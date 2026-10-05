@@ -112,6 +112,14 @@ public protocol SpeechTranscribing: Sendable {
 public protocol TextFormatting: Sendable {
     func prepare() async throws
     func format(_ text: String, style: TextStyle, context: String, vocabulary: [String]) async throws -> String
+    func format(_ text: String, style: TextStyle, context: String, vocabulary: [String], onModelUse: @Sendable (FormattingModel) -> Void) async throws -> String
+}
+
+public extension TextFormatting {
+    func format(_ text: String, style: TextStyle, context: String, vocabulary: [String], onModelUse: @Sendable (FormattingModel) -> Void) async throws -> String {
+        onModelUse(.other)
+        return try await format(text, style: style, context: context, vocabulary: vocabulary)
+    }
 }
 
 public struct DictationResult: Identifiable, Sendable {
@@ -121,7 +129,8 @@ public struct DictationResult: Identifiable, Sendable {
     public let usedFallback: Bool
     public let duration: Double
     public let isComplete: Bool
-    public init(id: UUID, text: String, original: String, usedFallback: Bool, duration: Double, isComplete: Bool = true) { self.id = id; self.text = text; self.original = original; self.usedFallback = usedFallback; self.duration = duration; self.isComplete = isComplete }
+    public let processing: ProcessingMetrics?
+    public init(id: UUID, text: String, original: String, usedFallback: Bool, duration: Double, isComplete: Bool = true, processing: ProcessingMetrics? = nil) { self.id = id; self.text = text; self.original = original; self.usedFallback = usedFallback; self.duration = duration; self.isComplete = isComplete; self.processing = processing }
 }
 
 public enum DeliveryStatus: String, Codable, Sendable { case confirmed, uncertain, failed, notAttempted }

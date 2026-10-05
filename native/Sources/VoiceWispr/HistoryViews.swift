@@ -10,6 +10,18 @@ private func time(_ seconds: Double) -> String {
     let minutes = Int(seconds / 60)
     return minutes >= 60 ? "\(minutes / 60) Std. \(minutes % 60) Min." : "\(minutes) Min."
 }
+private func processingTime(_ seconds: Double) -> String {
+    seconds.formatted(.number.precision(.fractionLength(2)).locale(Locale(identifier: "de_DE"))) + " s"
+}
+private func optimizationTitle(_ metrics: ProcessingMetrics) -> String {
+    switch metrics.optimizationStatus {
+    case .used: "\(metrics.model?.title ?? "Textoptimierung") ausgeführt"
+    case .notNeeded: "Optimierung automatisch übersprungen"
+    case .originalStyle: "Original-Stil ohne Optimierung"
+    case .originalRequested: "Originaltext angefordert"
+    case .fallback: "Optimierung: Rückfall auf Original"
+    }
+}
 private func dayTitle(_ date: Date) -> String {
     if Calendar.current.isDateInToday(date) { return "Heute" }
     if Calendar.current.isDateInYesterday(date) { return "Gestern" }
@@ -187,11 +199,26 @@ private struct HistoryRow: View {
                         Text("·")
                         Text(entry.appName ?? "Andere Apps").lineLimit(1)
                         if !entry.isComplete { Label("Teiltext", systemImage: "exclamationmark.circle").foregroundStyle(.orange) }
-                        else if entry.usedFallback { Text("Original verwendet").help("Die Textoptimierung war nicht verfügbar. Der erkannte Text blieb erhalten.") }
+                        else if entry.usedFallback && entry.processing == nil { Text("Original verwendet").help("Mindestens ein Abschnitt blieb im Original. Der Grund wurde für dieses Diktat noch nicht erfasst.") }
                         Image(systemName: entry.delivery == .confirmed ? "checkmark" : "questionmark.circle").help(deliveryTitle(entry.delivery))
                     }.font(.system(size: 11)).foregroundStyle(.secondary)
+                    if let metrics = entry.processing {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 7) {
+                                Label("\(processingTime(metrics.totalSeconds)) Verarbeitung", systemImage: "clock").monospacedDigit()
+                                Text("·"); Text(optimizationTitle(metrics))
+                            }.fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Label("\(processingTime(metrics.totalSeconds)) Verarbeitung", systemImage: "clock").monospacedDigit()
+                                Text(optimizationTitle(metrics))
+                            }
+                        }.font(.system(size: 11)).foregroundStyle(.secondary)
+                            .help("Wartezeit vom Aufnahmeende bis zum fertigen Text. Öffne das Diktat für die einzelnen Verarbeitungsschritte.")
+                    } else { Text("Verarbeitungszeit nicht gemessen").font(.system(size: 11)).foregroundStyle(.secondary) }
                 }.padding(.vertical, 9).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).pointerAwareFocus().accessibilityLabel("Diktat von \(dayTitle(entry.createdAt)), \(entry.createdAt.formatted(.dateTime.hour().minute().locale(Locale(identifier: "de_DE")))). \(entry.text)")
+            }.buttonStyle(.plain).pointerAwareFocus()
+                .accessibilityLabel("Diktat von \(dayTitle(entry.createdAt)), \(entry.createdAt.formatted(.dateTime.hour().minute().locale(Locale(identifier: "de_DE")))). \(entry.text)" +
+                    (entry.processing.map { ". Verarbeitung: \(processingTime($0.totalSeconds)). \(optimizationTitle($0))." } ?? ". Verarbeitungszeit nicht gemessen."))
             VStack(spacing: 10) {
                 if entry.deletedAt != nil {
                     Button { model.trashHistory(entry) } label: { Image(systemName: "arrow.uturn.backward") }.help("Diktat wiederherstellen").accessibilityLabel("Diktat wiederherstellen")
@@ -237,6 +264,22 @@ private struct HistoryDetail: View {
                 Picker("Textfassung", selection: $original) { Text("Aufbereitet").tag(false); Text("Original").tag(true) }.pickerStyle(.segmented).frame(maxWidth: 280)
             }
             if !entry.isComplete { Label("Unvollständiger Teiltext", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+            VStack(alignment: .leading, spacing: 7) {
+                if let metrics = entry.processing {
+                    Text("Verarbeitung").fontWeight(.semibold)
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 7) {
+                        GridRow { Text("Wartezeit nach Stopp"); Text(processingTime(metrics.totalSeconds)).gridColumnAlignment(.trailing) }
+                        if metrics.preparationSeconds >= 0.01 { GridRow { Text("Modellvorbereitung"); Text(processingTime(metrics.preparationSeconds)) } }
+                        GridRow { Text("Erkennung / Abgleich"); Text(processingTime(metrics.recognitionSeconds)) }
+                        GridRow { Text(metrics.model.map { "Textoptimierung (\($0.title))" } ?? "Textoptimierung"); Text(processingTime(metrics.optimizationSeconds)) }
+                    }.monospacedDigit()
+                    Text(optimizationTitle(metrics) + (metrics.modelCalls > 0 ? " · \(metrics.modelCalls) Modellaufruf\(metrics.modelCalls == 1 ? "" : "e")" : ""))
+                    Text("Zeiten ab Aufnahmeende bis zum fertigen Text, ohne Einfügen. Verarbeitung während der Aufnahme zählt nicht zur Wartezeit. Schritte können überlappen.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else { LabeledContent("Verarbeitungszeit", value: "Nicht gemessen") }
+                Text("\(processingTime(entry.duration)) Aufnahme · \(number(entry.wordCount)) Wörter").foregroundStyle(.secondary)
+            }.font(.system(size: 12))
+            Divider()
             ScrollView { Text(original ? entry.original : entry.text).font(.system(size: 14)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4) }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Text(deliveryTitle(entry.delivery)).font(.system(size: 11)).foregroundStyle(.secondary)
             HStack {
@@ -250,7 +293,8 @@ private struct HistoryDetail: View {
         let text = original ? entry.original : entry.text
         let size = (text as NSString).boundingRect(with: NSSize(width: 522, height: 10_000), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: NSFont.systemFont(ofSize: 14)])
         let variants: CGFloat = !entry.original.isEmpty && entry.original != entry.text ? 44 : 0
-        return min(600, max(300, ceil(size.height) + 220 + variants + (entry.isComplete ? 0 : 28)))
+        let processing: CGFloat = entry.processing.map { $0.preparationSeconds >= 0.01 ? 210 : 190 } ?? 60
+        return min(600, max(300, ceil(size.height) + 220 + variants + processing + (entry.isComplete ? 0 : 28)))
     }
 }
 

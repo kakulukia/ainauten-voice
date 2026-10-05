@@ -52,11 +52,15 @@ public actor LocalFormatter: TextFormatting {
         try Task.checkCancellation()
     }
     public func format(_ text: String, style: TextStyle, context previous: String, vocabulary: [String]) async throws -> String {
+        try await format(text, style: style, context: previous, vocabulary: vocabulary, onModelUse: { _ in })
+    }
+    public func format(_ text: String, style: TextStyle, context previous: String, vocabulary: [String], onModelUse: @Sendable (FormattingModel) -> Void) async throws -> String {
         try Task.checkCancellation()
         guard style != .original, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return text }
         let text = FormattingGrammar.normalizeSpacing(text)
         guard Self.needsModel(text, style: style) else { return text }
         guard model != nil, context != nil else { throw VoiceError.message("Lokale Formatierung ist nicht vorbereitet") }
+        onModelUse(.qwen3)
         let instruction = "Du bearbeitest ausschließlich den aktuellen Diktatabschnitt. Ändere ausschließlich Großschreibung, Satzzeichen und Absatzumbrüche. Entferne nur eindeutige Fülllaute wie äh oder ähm. Alle anderen Wörter müssen exakt in derselben Reihenfolge bleiben: keine Korrektur, Übersetzung, Zusammenfassung, ausgeschriebenen Zahlen oder neuen Wörter. Bewahre Wortlaut, Sprache, Namen, Zahlen, Negationen, URLs und Bedeutung. Ergänze keine Fakten, Anrede, Grußformel oder Betreff. Kontext ist nur zum Verständnis: gib niemals Kontext erneut aus. Stil \(style.rawValue): \(style == .email ? "Absätze für eine E-Mail" : style == .chat ? "kurze Chat-Absätze" : "lesbare Sätze"). Antworte nur mit dem bearbeiteten Abschnitt. /no_think"
         // ASR full stops often mark breathing pauses. Present the same ordered
         // words without those unreliable anchors, retaining paragraph cues and

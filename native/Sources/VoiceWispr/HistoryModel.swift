@@ -142,11 +142,18 @@ extension AppModel {
             "Bitte verschiebe den Termin auf Donnerstag. Die Uhrzeit bleibt gleich.",
             "Der Text ist im Wörterbuch unter OpenAI gespeichert. Namen und Fachbegriffe sollen ihre richtige Schreibweise behalten."
         ]
+        let measurements: [ProcessingMetrics] = [
+            .init(totalSeconds: 2.4, recognitionSeconds: 0.6, optimizationSeconds: 1.8, optimizationStatus: .used, model: .qwen3, modelCalls: 2),
+            .init(totalSeconds: 0.3, recognitionSeconds: 0.25, optimizationSeconds: 0, optimizationStatus: .notNeeded),
+            .init(totalSeconds: 1.2, recognitionSeconds: 0.4, optimizationSeconds: 0.8, optimizationStatus: .originalRequested, model: .qwen3, modelCalls: 1),
+            .init(totalSeconds: 8.5, recognitionSeconds: 0.5, optimizationSeconds: 8, optimizationStatus: .fallback, model: .qwen3, modelCalls: 1),
+            .init(totalSeconds: 0.2, recognitionSeconds: 0.15, optimizationSeconds: 0, optimizationStatus: .originalStyle)
+        ]
         if !empty {
             historyPreviewEntries = (0..<16).map { index in
                 let date = Calendar.current.date(byAdding: .day, value: -(index / 3), to: Date().addingTimeInterval(Double(-index * 1800)))!
                 let text = sentences[index % sentences.count]
-                return HistoryEntry(result: .init(id: UUID(), text: text, original: index == 0 ? "vielen Dank für die Rückmeldung der überarbeitete Entwurf ist fertig bitte prüfe die Zahlen und gib mir bis morgen Bescheid" : text, usedFallback: index == 11, duration: Double(14 + index), isComplete: index != 7), createdAt: date, style: index % 3 == 0 ? .email : .cleaned, appBundleID: index % 2 == 0 ? "com.apple.mail" : "com.apple.TextEdit", appName: index % 2 == 0 ? "Mail" : "TextEdit", delivery: index == 7 ? .notAttempted : index == 8 ? .uncertain : .confirmed, favorite: index == 1 || index == 3, deletedAt: index == 15 ? date : nil)
+                return HistoryEntry(result: .init(id: UUID(), text: text, original: index == 0 ? "vielen Dank für die Rückmeldung der überarbeitete Entwurf ist fertig bitte prüfe die Zahlen und gib mir bis morgen Bescheid" : text, usedFallback: index == 2 || index == 3 || index == 11, duration: Double(14 + index), isComplete: index != 7, processing: index < measurements.count ? measurements[index] : nil), createdAt: date, style: index == 4 ? .original : index % 3 == 0 ? .email : .cleaned, appBundleID: index % 2 == 0 ? "com.apple.mail" : "com.apple.TextEdit", appName: index % 2 == 0 ? "Mail" : "TextEdit", delivery: index == 7 ? .notAttempted : index == 8 ? .uncertain : .confirmed, favorite: index == 1 || index == 3, deletedAt: index == 15 ? date : nil)
             }
         }
         document.dictionary = [.init(phrase: "OpenAI"), .init(phrase: "AInauten"), .init(phrase: "Chat GPT", replacement: "ChatGPT"), .init(phrase: "Projektstatus"), .init(phrase: "Mit"), .init(phrase: "Rückmeldung")]

@@ -45,11 +45,32 @@ Die lokalen Optimierungsfälle sind ausdrücklich synthetische Texte. Die öffen
 
 Bei `SwiftUIMacros.StateMacro`-Fehlern in neuen Command Line Tools ist die passende SwiftUI-Macro-Laufzeit erforderlich. Auf dem Referenzsystem wurde der Release-Build mit `swift build --build-system native --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk -c release --jobs 4` geprüft. Nutze nur ein bereits vorhandenes, kompatibles SDK oder vollständiges passendes Xcode; ändere keine globale Toolchain-Konfiguration für eine Nutzerinstallation. Dieser Build-Befehl allein erstellt noch kein installierbares App-Bundle.
 
+## Aus dem Projektordner starten
+
+Die laufende AInauten Voice über ihr App-Menü beenden, dann im Ordner `native` auf **Start Local.command** doppelklicken. Der Starter öffnet den zuletzt vorbereiteten lokalen Build und verhindert den Start, solange eine andere AInauten-Version läuft. Die App im Programme-Ordner bleibt erhalten. Im Terminal geht derselbe Start mit `./native/Start\ Local.command` aus dem Repository.
+
+Einmalig und nach Quellcodeänderungen den lokalen Build im Ordner `native` vorbereiten:
+
+```sh
+python3 scripts/package.py --local --adhoc \
+  --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk \
+  --build-system native \
+  --uv '/Applications/AInauten Voice.app/Contents/Resources/LipReading/uv'
+```
+
+Dieser Befehl verwendet das auf dem Entwicklungsgerät vorhandene kompatible SDK und den bereits installierten uv 0.12.5. Bei vorhandener fester Signieridentität wird diese auch mit `--adhoc` weiterverwendet. Ohne diese Identität ist der lokale Build ad hoc signiert und macOS kann erneut nach Mikrofon- und Bedienungshilfenfreigaben fragen. Diese Freigaben bewusst selbst bestätigen.
+
+Das geprüfte Bundle liegt unter `artifacts/`; `.local/AInauten Voice.app` verweist auf den letzten erfolgreichen lokalen Build. Er hat keinen Updatekanal, sodass ein öffentliches Update ihn nicht ersetzt. Modelle, Wörterbuch, Einstellungen und Schlüsselbunddienste werden weiterverwendet.
+
+Vor der ersten Umstellung eines Schema-1-Verlaufs sichert der Starter Verlauf und Einstellungen unter `.local/backups/before-history-v2/`. Die installierte Version 0.1.4 kann den neuen Schema-2-Verlauf nicht lesen. Für eine Rückkehr zur alten Version zunächst beide Apps beenden und die gesicherte Datenbank wiederherstellen; seitdem hinzugekommene Diktate vorher aus der lokalen App exportieren. Sicherung und Builds sind privat und werden von Git ignoriert.
+
 ## Sicherheit und Zustellung
 
 Einfügung nur in unveränderte, lesbare AX-Ziele. Bestätigung verlangt kompletten Text-/Cursor-Readback, keine bloße Tastensimulation. Bei Zweifel vollständiges Ergebnisfenster; keine automatische Wiederholung. Zwischenablage wird byteweise gesichert, bei unlesbaren/über 64 MB großen Inhalten nicht verändert; ein neuer Benutzer-Copy gewinnt. macOS stellt keine atomare Fokus-und-Paste-Operation bereit. Verzögerte Einfügeziele können nach dem 1,5-Sekunden-Fenster unklar bleiben.
 
 Einstellungen und Wörterbuch: `~/Library/Application Support/Voice Wispr/settings.json`, atomar, versioniertes Exportformat. API-Schlüssel ausschließlich Keychain. Audio und die fünf letzten Resultate für den Schnellzugriff bleiben im Speicher. Bei eingeschaltetem Verlauf werden Diktattexte zusätzlich lokal in history.sqlite gespeichert; das lässt sich in der App abschalten. SDK-Transkript-Diagnosen und llama-Logs sind deaktiviert. Die App liest den fokussierten Text ausschließlich für lokale Zustellungsprüfung; er wird weder an ein Sprachmodell noch an Cloud gesendet.
+
+Neue Sprachdiktate zeigen in Übersicht und Verlauf die Verarbeitungsdauer ab Aufnahmeende bis zum fertigen Text, ohne die anschließende Einfügung. Die Detailansicht trennt Modellvorbereitung, Erkennung einschließlich Abgleich und Textoptimierung. Zeiten während der Aufnahme zählen nicht zur Wartezeit; gleichzeitig laufende Schritte können sich überlappen. Modellaufrufe werden auch während der Aufnahme gezählt. Der Optimierungsstatus unterscheidet ausgeführte Modellaufrufe, automatisch übersprungene Optimierung, Original-Stil, bewusst angeforderten Originaltext und einen Rückfall bei Problemen. Ältere Einträge und Ergebnisse ohne Messung bleiben als nicht gemessen erkennbar. Schema 2 ergänzt nur optionale Messdaten; Schema-1-Verläufe werden ohne Änderung ihrer Texte und Markierungen übernommen.
 
 ## Stand und Nachweise
 

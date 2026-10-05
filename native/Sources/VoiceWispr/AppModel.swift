@@ -820,6 +820,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
             traceRecoveryPreview("stopped"); return
         }
         #endif
+        let stoppedAt = ProcessInfo.processInfo.systemUptime
         var captured = capture.stop(); captureReady = false; clock?.invalidate(); clock = nil
         // Short recordings may contain a complete word. Let recognition decide;
         // the no-speech path below already avoids opening a recovery window.
@@ -840,7 +841,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                 guard accepted <= captured.count else { throw VoiceError.message("Audioabschnitte konnten nicht sicher zusammengefügt werden.") }
                 if accepted < captured.count { try await pipeline.append(samples: Array(captured.dropFirst(accepted))) }
                 if originalRequested { await pipeline.requestOriginal() }
-                let result = try await pipeline.finish()
+                let result = try await pipeline.finish(stoppedAt: stoppedAt)
                 guard sessionID == id, !Task.isCancelled else { return }
                 guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NoSpeechDetected(errorDescription: "Keine Sprache erkannt. Bitte sprich einen ganzen Satz und versuche es erneut.") }
                 results.insert(result, at: 0); results = Array(results.prefix(5))

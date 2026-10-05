@@ -7,6 +7,7 @@ public struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     public let text: String
     public let original: String
     public let duration: Double
+    public let processing: ProcessingMetrics?
     public let style: TextStyle
     public let appBundleID: String?
     public let appName: String?
@@ -24,7 +25,8 @@ public struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
         // Canonical milliseconds round-trip exactly through SQLite's Epoch REAL.
         self.createdAt = Date(timeIntervalSince1970: (createdAt.timeIntervalSince1970 * 1000).rounded() / 1000)
         text = result.text; original = result.original
-        duration = result.duration; self.style = style; self.appBundleID = appBundleID; self.appName = appName
+        duration = result.duration; processing = result.processing.flatMap { $0.isValid ? $0 : nil }
+        self.style = style; self.appBundleID = appBundleID; self.appName = appName
         usedFallback = result.usedFallback; isComplete = result.isComplete; self.delivery = delivery
         self.favorite = favorite; self.deletedAt = deletedAt
     }
@@ -147,7 +149,7 @@ public actor HistoryStore {
         do {
             sqlite3_busy_timeout(db, 2000)
             let version = try scalar("PRAGMA user_version", db: db)
-            guard version <= 1 else { throw VoiceError.message("Der Verlauf stammt aus einer neueren App-Version. Die Datei bleibt unverändert.") }
+            guard version <= 2 else { throw VoiceError.message("Der Verlauf stammt aus einer neueren App-Version. Die Datei bleibt unverändert.") }
             if version == 0 {
                 try execute("BEGIN IMMEDIATE", db: db)
                 do {
@@ -158,12 +160,17 @@ public actor HistoryStore {
                         style TEXT NOT NULL, bundle TEXT, app_name TEXT,
                         fallback INTEGER NOT NULL, complete INTEGER NOT NULL, delivery TEXT NOT NULL,
                         favorite INTEGER NOT NULL DEFAULT 0, deleted REAL, words INTEGER NOT NULL,
-                        search_text TEXT NOT NULL);
+                        search_text TEXT NOT NULL, processing TEXT);
                         CREATE INDEX history_date ON dictations(deleted, created DESC, id DESC);
                         CREATE INDEX history_favorite ON dictations(favorite, deleted, created DESC);
-                        PRAGMA user_version=1;
+                        PRAGMA user_version=2;
                         COMMIT;
                         """, db: db)
+                } catch { try? execute("ROLLBACK", db: db); throw error }
+            } else if version == 1 {
+                try execute("BEGIN IMMEDIATE", db: db)
+                do {
+                    try execute("ALTER TABLE dictations ADD COLUMN processing TEXT; PRAGMA user_version=2; COMMIT;", db: db)
                 } catch { try? execute("ROLLBACK", db: db); throw error }
             }
             database = db; return db
@@ -177,7 +184,7 @@ public actor HistoryStore {
               entry.text.utf8.count <= 4_194_304, entry.original.utf8.count <= 4_194_304,
               (entry.appBundleID?.utf8.count ?? 0) <= 512, (entry.appName?.utf8.count ?? 0) <= 512 else { throw storageError() }
         let db = try open()
-        let sql = "INSERT OR IGNORE INTO dictations (id,created,text,original,duration,style,bundle,app_name,fallback,complete,delivery,favorite,deleted,words,search_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        let sql = "INSERT OR IGNORE INTO dictations (id,created,text,original,duration,style,bundle,app_name,fallback,complete,delivery,favorite,deleted,words,search_text,processing) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         let statement = try prepare(sql, db: db); defer { sqlite3_finalize(statement) }
         try bind(entry.id.uuidString, to: 1, statement); sqlite3_bind_double(statement, 2, entry.createdAt.timeIntervalSince1970)
         try bind(entry.text, to: 3, statement); try bind(entry.original, to: 4, statement); sqlite3_bind_double(statement, 5, entry.duration)
@@ -186,6 +193,8 @@ public actor HistoryStore {
         try bind(entry.delivery.rawValue, to: 11, statement); sqlite3_bind_int(statement, 12, entry.favorite ? 1 : 0)
         if let date = entry.deletedAt { sqlite3_bind_double(statement, 13, date.timeIntervalSince1970) } else { sqlite3_bind_null(statement, 13) }
         sqlite3_bind_int64(statement, 14, Int64(entry.wordCount)); try bind(HistoryWords.searchKey(entry.text + "\n" + entry.original), to: 15, statement)
+        let processing = try entry.processing.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }
+        try bind(processing, to: 16, statement)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw storageError() }
         return sqlite3_changes(db) > 0
     }
@@ -193,7 +202,7 @@ public actor HistoryStore {
     public func page(filter: HistoryFilter = .init(), limit: Int = 50, offset: Int = 0) throws -> HistoryPage {
         let db = try open(), (whereSQL, values) = predicate(filter)
         let total = try scalar("SELECT COUNT(*) FROM dictations WHERE " + whereSQL, values: values, db: db)
-        let statement = try prepare("SELECT id,created,text,original,duration,style,bundle,app_name,fallback,complete,delivery,favorite,deleted FROM dictations WHERE " + whereSQL + " ORDER BY created DESC,id DESC LIMIT ? OFFSET ?", db: db)
+        let statement = try prepare("SELECT id,created,text,original,duration,style,bundle,app_name,fallback,complete,delivery,favorite,deleted,processing FROM dictations WHERE " + whereSQL + " ORDER BY created DESC,id DESC LIMIT ? OFFSET ?", db: db)
         defer { sqlite3_finalize(statement) }
         try bind(values, statement)
         sqlite3_bind_int(statement, Int32(values.count + 1), Int32(min(500, max(1, limit))))
@@ -281,7 +290,9 @@ public actor HistoryStore {
               let text = string(statement, 2), let original = string(statement, 3),
               let style = string(statement, 5).flatMap(TextStyle.init(rawValue:)),
               let status = string(statement, 10).flatMap(DeliveryStatus.init(rawValue:)) else { throw storageError() }
-        let result = DictationResult(id: id, text: text, original: original, usedFallback: sqlite3_column_int(statement, 8) != 0, duration: sqlite3_column_double(statement, 4), isComplete: sqlite3_column_int(statement, 9) != 0)
+        let processing = string(statement, 13).flatMap { try? JSONDecoder().decode(ProcessingMetrics.self, from: Data($0.utf8)) }
+            .flatMap { $0.isValid ? $0 : nil }
+        let result = DictationResult(id: id, text: text, original: original, usedFallback: sqlite3_column_int(statement, 8) != 0, duration: sqlite3_column_double(statement, 4), isComplete: sqlite3_column_int(statement, 9) != 0, processing: processing)
         return HistoryEntry(result: result, createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)), style: style, appBundleID: string(statement, 6), appName: string(statement, 7), delivery: status, favorite: sqlite3_column_int(statement, 11) != 0, deletedAt: sqlite3_column_type(statement, 12) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 12)))
     }
     private func string(_ statement: OpaquePointer, _ column: Int32) -> String? {

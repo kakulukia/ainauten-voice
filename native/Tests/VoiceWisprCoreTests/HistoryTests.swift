@@ -47,6 +47,53 @@ final class HistoryTests: XCTestCase {
         let trash = try await store.page(filter: .init(trash: true))
         XCTAssertEqual(trash.total, 1); XCTAssertTrue(try XCTUnwrap(trash.entries.first).favorite)
     }
+    func testProcessingMetricsSurviveReopenAndExport() async throws {
+        let url = try location(), writer = HistoryStore(url: url)
+        let metrics = ProcessingMetrics(totalSeconds: 2.4, recognitionSeconds: 0.6, optimizationSeconds: 1.8, optimizationStatus: .originalRequested, model: .qwen3, modelCalls: 2)
+        let item = HistoryEntry(result: .init(id: UUID(), text: "Synthetic example.", original: "Synthetic example.", usedFallback: true, duration: 3, processing: metrics), style: .cleaned, delivery: .confirmed)
+        try await writer.insert(item)
+        let page = try await HistoryStore(url: url).page()
+        XCTAssertEqual(page.entries, [item]); XCTAssertEqual(page.entries.first?.processing, metrics)
+        let export = url.deletingLastPathComponent().appendingPathComponent("metrics.json")
+        try await writer.export(to: export)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: export)) as? [String: Any])
+        let entries = try XCTUnwrap(object["entries"] as? [[String: Any]])
+        let stored = try XCTUnwrap(entries.first?["processing"] as? [String: Any])
+        XCTAssertEqual(stored["optimizationStatus"] as? String, "originalRequested")
+        XCTAssertEqual(stored["modelCalls"] as? Int, 2)
+    }
+    func testVersionOneMigrationPreservesTextFlagsAndUnknownTiming() async throws {
+        let url = try location(), item = entry()
+        try await HistoryStore(url: url).insert(item)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, "ALTER TABLE dictations DROP COLUMN processing; PRAGMA user_version=1; UPDATE dictations SET favorite=1;", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+        let store = HistoryStore(url: url), page = try await store.page()
+        XCTAssertEqual(page.entries.first?.text, item.text); XCTAssertEqual(page.entries.first?.favorite, true)
+        XCTAssertNil(page.entries.first?.processing)
+        let data = try JSONEncoder().encode(item)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "processing")
+        let legacy = try JSONDecoder().decode(HistoryEntry.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertNil(legacy.processing)
+        XCTAssertEqual(legacy, item)
+    }
+    func testInvalidOrDamagedTimingDoesNotReplaceDictationText() async throws {
+        let url = try location(), store = HistoryStore(url: url), item = entry()
+        let invalid = ProcessingMetrics(totalSeconds: 1, recognitionSeconds: 2, optimizationSeconds: 0, optimizationStatus: .notNeeded)
+        let sanitized = HistoryEntry(result: .init(id: UUID(), text: "Synthetic example.", original: "Synthetic example.", usedFallback: false, duration: 3, processing: invalid), style: .cleaned, delivery: .confirmed)
+        XCTAssertNil(sanitized.processing)
+        let inserted = try await store.insert(sanitized); XCTAssertTrue(inserted)
+        try await store.insert(item)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, "UPDATE dictations SET processing='broken-json';", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+        let page = try await store.page()
+        XCTAssertEqual(Set(page.entries.map(\.id)), Set([item.id, sanitized.id]))
+        XCTAssertTrue(page.entries.allSatisfy { $0.processing == nil })
+    }
     func testSearchUsesOriginalUnicodeAndLiteralWildcards() async throws {
         let store = HistoryStore(url: try location())
         try await store.insert(entry("Die Ausgabe.", original: "Grüße mit 50% und A_B"))

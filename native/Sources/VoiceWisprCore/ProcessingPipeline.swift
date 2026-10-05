@@ -37,7 +37,11 @@ public actor ProcessingPipeline {
     struct SeamWord: Sendable { let word: TranscriptWord; let committed: Bool; let ownershipTime: Double }
     struct SeamSelection: Sendable { let text: String; let words: [TranscriptWord]; let window: [SeamWord] }
     private let speech: SpeechTranscribing
-    private let formatter: TextFormatting
+    private let baseFormatter: TextFormatting
+    private var formatter: TextFormatting
+    private var measurement = ProcessingMeasurement()
+    private var stoppedAt: Double?
+    private var manuallyRequestedOriginal = false
     private let activity: (any SpeechActivityDetecting)?
     private let observeSegment: (@Sendable (Range<Int>, TranscriptSegment) -> Void)?
     private let coreSamples: Int
@@ -89,7 +93,7 @@ public actor ProcessingPipeline {
     private let maxFormattingBacklog = 4
     public init(speech: SpeechTranscribing, formatter: TextFormatting, coreSamples: Int = 224_000, overlapSamples: Int = 8000, observeSegment: (@Sendable (Range<Int>, TranscriptSegment) -> Void)? = nil, checkpointMinimumSamples: Int = 720_000, checkpointIntervalSamples: Int = 240_000, observeCheckpoint: (@Sendable (Int, Bool) -> Void)? = nil) {
         precondition(coreSamples >= 16_000 && overlapSamples >= 0 && coreSamples + 2 * overlapSamples <= 240_000, "ASR window including overlap must be at most fifteen seconds")
-        self.speech = speech; self.formatter = formatter; self.activity = speech as? any SpeechActivityDetecting
+        self.speech = speech; self.baseFormatter = formatter; self.formatter = formatter; self.activity = speech as? any SpeechActivityDetecting
         self.observeSegment = observeSegment
         self.coreSamples = coreSamples
         self.overlapSamples = overlapSamples
@@ -100,6 +104,8 @@ public actor ProcessingPipeline {
 
     public func start(sessionID: UUID = UUID(), style: TextStyle, dictionary entries: [DictionaryEntry] = []) async throws {
         cancel()
+        measurement = ProcessingMeasurement()
+        formatter = MeasuredFormatter(base: baseFormatter, measurement: measurement)
         let token = UUID(); generation = token; self.sessionID = sessionID; self.style = style
         samples = []; jobs = []; formats = []; raw = []; rendered = []; fallback = false; failure = nil; replacedSamples = 0
         formattingCache = []
@@ -109,6 +115,7 @@ public actor ProcessingPipeline {
         previousWindow = []
         originalRequested = false
         matcher = StreamingDictionaryMatcher(entries); dictionary = DictionaryMatcher(entries)
+        let preparation = measurement.begin(.preparation); defer { measurement.end(preparation) }
         try await speech.prepare(); try ensure(token)
         formatterReady = style == .original
         if style != .original {
@@ -129,8 +136,9 @@ public actor ProcessingPipeline {
         else { segmentAvailable(final: false); launchASR() }
         launchCheckpoint()
     }
-    public func finish() async throws -> DictationResult {
+    public func finish(stoppedAt: Double? = nil) async throws -> DictationResult {
         guard let id = sessionID, accepting else { throw VoiceError.message("Kein aktives Diktat") }
+        self.stoppedAt = stoppedAt ?? ProcessInfo.processInfo.systemUptime
         let token = generation; accepting = false
         stopCheckpoint()
         let reconciliation = samples.count > 240_000 ? speech as? any SpeechSessionReconciling : nil
@@ -153,7 +161,11 @@ public actor ProcessingPipeline {
             do {
                 let pcm = samples
                 let known = checkpoint.flatMap { $0.sampleEnd == pcm.count ? $0.transcript : nil }
-                let verification = Task { if let known { return known }; return try await reconciliation.reconcile(samples: pcm, sessionID: id) }
+                let measurement = self.measurement
+                let verification = Task {
+                    if let known { return known }
+                    return try await measurement.measure(.recognition) { try await reconciliation.reconcile(samples: pcm, sessionID: id) }
+                }
                 reconciliationTask = verification
                 var verified = try await withTaskCancellationHandler {
                     try await verification.value
@@ -218,13 +230,14 @@ public actor ProcessingPipeline {
         if let failure { try throwFailure(failure, id: id, token: token) }
         let original = raw.filter { !$0.isEmpty }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         let text = originalRequested ? dictionary.replace(in: original) : ParagraphLayout.joinSections(rendered)
-        let result = DictationResult(id: id, text: originalRequested ? text : ParagraphLayout.apply(text, style: style), original: original, usedFallback: style != .original && (fallback || originalRequested), duration: Double(samples.count) / 16_000)
+        let result = DictationResult(id: id, text: originalRequested ? text : ParagraphLayout.apply(text, style: style), original: original, usedFallback: style != .original && (fallback || originalRequested), duration: Double(samples.count) / 16_000, processing: processingMetrics())
         sessionID = nil; samples = []; jobs = []; formats = []; previousWindow = []
         return result
     }
     public func cancel() {
         generation = UUID(); accepting = false; sessionID = nil
         formatterGeneration = UUID(); originalRequested = false
+        stoppedAt = nil; manuallyRequestedOriginal = false
         asrTask?.cancel(); formatTask?.cancel(); segmentTask?.cancel(); reconciliationTask?.cancel()
         revisionTask?.cancel(); revisionTask = nil
         formattingCompletion?.release(); formattingCompletion = nil
@@ -237,6 +250,7 @@ public actor ProcessingPipeline {
     /// Recognition still completes once; this never creates a second delivery result.
     public func requestOriginal() {
         guard sessionID != nil, style != .original, !originalRequested else { return }
+        manuallyRequestedOriginal = true
         originalRequested = true
         stopCheckpoint(); checkpoint = nil
         discardFormatting()
@@ -283,7 +297,7 @@ public actor ProcessingPipeline {
     }
     private func prepareCheckpoint(speech: any SpeechSessionReconciling, pcm: [Float], end: Int, id: UUID, token: UUID, checkpointToken: UUID) async {
         do {
-            let verified = try await speech.reconcile(samples: pcm, sessionID: id)
+            let verified = try await measurement.measure(.recognition) { try await speech.reconcile(samples: pcm, sessionID: id) }
             try ensureCheckpoint(token, checkpointToken)
             guard verified.sessionID == id, !verified.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceError.message("Ungültiger Aufnahme-Abgleich") }
             let target = dictionary.replace(in: verified.text)
@@ -316,13 +330,19 @@ public actor ProcessingPipeline {
         cancel()
     }
     private func ensure(_ token: UUID) throws { try Task.checkCancellation(); guard token == generation, sessionID != nil else { throw CancellationError() } }
+    private func processingMetrics() -> ProcessingMetrics? {
+        guard let stoppedAt else { return nil }
+        let status: OptimizationStatus = style == .original ? .originalStyle : manuallyRequestedOriginal ? .originalRequested :
+            fallback || originalRequested ? .fallback : .notNeeded
+        return measurement.snapshot(stoppedAt: stoppedAt, status: status)
+    }
     private func throwFailure(_ error: Error, id: UUID, token: UUID) throws -> Never {
         try ensure(token)
         if error is CancellationError { throw CancellationError() }
         let original = raw.filter { !$0.isEmpty }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !original.isEmpty else { cancel(); throw error }
         let result = DictationResult(id: id, text: original, original: original, usedFallback: false,
-            duration: Double(samples.count) / 16_000, isComplete: false)
+            duration: Double(samples.count) / 16_000, isComplete: false, processing: processingMetrics())
         cancel()
         throw PartialDictationError(result: result, reason: error.localizedDescription)
     }
@@ -395,7 +415,9 @@ public actor ProcessingPipeline {
                 try ensure(token)
                 let job = jobs.removeFirst()
                 let pcm = Array(samples[job.audio])
-                let segment = try await speech.transcribe(samples: pcm, sessionID: id, index: job.index, offset: Double(job.audio.lowerBound) / 16_000)
+                let segment = try await measurement.measure(.recognition) {
+                    try await speech.transcribe(samples: pcm, sessionID: id, index: job.index, offset: Double(job.audio.lowerBound) / 16_000)
+                }
                 try ensure(token)
                 guard segment.sessionID == id, segment.index == job.index else { throw VoiceError.message("Spracherkennung lieferte einen fremden Abschnitt") }
                 observeSegment?(job.commit, segment)
