@@ -460,4 +460,5 @@ if args.install:
     shutil.copytree(app, target, symlinks=True)
     print("INSTALLED", target)
 print("APP", app)
-print("DMG", dmg)
+if not args.local:
+    print("DMG", dmg)

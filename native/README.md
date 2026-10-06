@@ -56,8 +56,6 @@ Die Absatzprüfung protokolliert auch fehlgeschlagene Formatierungsversuche mit 
 
 ## Aus dem Projektordner starten
 
-Beim Halten-Kürzel Strg+Z genügt es, die Kombination einmal zu drücken und anschließend nur Strg festzuhalten. Z darf losgelassen werden; das Diktat endet beim Loslassen von Strg. Für den Freihändig-Modus die vollständige Kombination zweimal kurz drücken und loslassen.
-
 Die laufende AInauten Voice über ihr App-Menü beenden, dann im Ordner `native` auf **Start Local.command** doppelklicken. Der Starter öffnet den zuletzt vorbereiteten lokalen Build und verhindert den Start, solange eine andere AInauten-Version läuft. Die App im Programme-Ordner bleibt erhalten. Im Terminal geht derselbe Start mit `./native/Start\ Local.command` aus dem Repository.
 
 Einmalig und nach Quellcodeänderungen den lokalen Build im Ordner `native` vorbereiten:
