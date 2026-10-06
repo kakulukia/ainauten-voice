@@ -611,6 +611,10 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         updateItem.target = self; appMenu.addItem(updateItem)
         let reportItem = NSMenuItem(title: L10n.text("menu.report"), action: #selector(openReportHelp), keyEquivalent: "")
         reportItem.target = self; appMenu.addItem(reportItem)
+        appMenu.addItem(.separator())
+        let hideItem = NSMenuItem(title: L10n.text("menu.hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        hideItem.target = NSApplication.shared; appMenu.addItem(hideItem)
+        appMenu.addItem(.separator())
         let quitItem = NSMenuItem(title: L10n.text("menu.quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self; appMenu.addItem(quitItem); appItem.submenu = appMenu
         mainMenu.addItem(appItem)
