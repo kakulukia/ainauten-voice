@@ -515,6 +515,10 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         updateItem.target = self; appMenu.addItem(updateItem)
         let reportItem = NSMenuItem(title: "Fehler melden …", action: #selector(openReportHelp), keyEquivalent: "")
         reportItem.target = self; appMenu.addItem(reportItem)
+        appMenu.addItem(.separator())
+        let hideItem = NSMenuItem(title: "AInauten Voice ausblenden", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        hideItem.target = NSApplication.shared; appMenu.addItem(hideItem)
+        appMenu.addItem(.separator())
         let quitItem = NSMenuItem(title: "AInauten Voice beenden", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self; appMenu.addItem(quitItem); appItem.submenu = appMenu
         mainMenu.addItem(appItem)
@@ -770,7 +774,8 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                     guard let endpoint = URL(string: document.settings.cloudEndpoint), let key = try KeychainStorage().key() else { throw VoiceError.message("Cloud-Optimierung benötigt einen API-Schlüssel.") }
                     selectedFormatter = CloudFormatter(endpoint: endpoint, model: document.settings.cloudModel, key: key)
                 } else { selectedFormatter = formatter }
-                let pipeline = ProcessingPipeline(speech: speech, formatter: selectedFormatter); self.pipeline = pipeline
+                let pipeline = ProcessingPipeline(speech: speech, formatter: selectedFormatter,
+                    preserveCompletedSentences: !document.settings.cloudEnabled); self.pipeline = pipeline
                 guard sessionID == id, state == .recording else { return }
                 #if DEBUG
                 if practice && practiceFixture != nil {

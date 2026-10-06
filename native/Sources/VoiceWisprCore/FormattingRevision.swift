@@ -23,7 +23,7 @@ enum FormattingRevision {
         }
         return Plan(pieces: pieces, reusedWords: 0, revisedWords: tokens.count)
     }
-    static func render(plan: Plan, target: String, formatter: TextFormatting, style: TextStyle, dictionary: DictionaryMatcher) async throws -> (String, Bool) {
+    static func render(plan: Plan, target: String, formatter: TextFormatting, style: TextStyle, dictionary: DictionaryMatcher, preserveCompletedSentences: Bool = false) async throws -> (String, Bool) {
         var output = "", failed = false
         for piece in plan.pieces {
             try Task.checkCancellation()
@@ -31,7 +31,7 @@ enum FormattingRevision {
             case .reuse(let text): output += text
             case .revise(let text):
                 do {
-                    let window = FormattingWindow.continuation(previous: .init(input: output, output: output, formatted: true), next: text, preservePrefix: true)
+                    let window = FormattingWindow.continuation(previous: .init(input: output, output: output, formatted: true), next: text, preservePrefix: true, maximumSentences: preserveCompletedSentences ? 1 : 2)
                     let input = window?.input ?? text.trimmingCharacters(in: .whitespacesAndNewlines)
                     let formatted = try await formatter.format(input, style: style, context: LocalFormatter.lastTwoSentences(window?.prefixOutput ?? output), vocabulary: dictionary.topVocabulary(in: input))
                     _ = try LocalFormatter.validate(formatted, original: input, vocabulary: dictionary.topVocabulary(in: input))

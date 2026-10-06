@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """Build a signed app and DMG without deleting existing artifacts or keys."""
 
-import argparse, base64, datetime, os, pathlib, plistlib, re, shutil, subprocess
+import argparse
+import base64
+import datetime
+import os
+import pathlib
+import plistlib
+import re
+import shutil
+import subprocess
+import tempfile
 from package_dmg import create_dmg
-from app_bundle import verify_runtime
+from app_bundle import verify_runtime, replace_local_app
 
 root = pathlib.Path(__file__).resolve().parents[1]
 p = argparse.ArgumentParser()
@@ -65,13 +74,16 @@ if public_key is not None:
         p.error("invalid public update key")
 # Only a public fingerprint is stored here. The signing key stays in Keychain.
 identity_file = root / ".local" / "signing-identity"
+local_identity_file = root / ".local" / "local-signing-identity"
+if args.local and local_identity_file.exists():
+    identity_file = local_identity_file
 identity = args.sign_identity or (
     identity_file.read_text().strip() if identity_file.exists() else "-"
 )
 # Ad-hoc bundles lose macOS permissions on every update; never produce them silently.
 if identity == "-" and not args.adhoc:
     p.error(
-        "stable signing identity missing (.local/signing-identity); pass --adhoc only for a local test build"
+        "stable signing identity missing (.local/local-signing-identity for local builds or .local/signing-identity); pass --adhoc only for a local test build"
     )
 if identity != "-":
     if not re.fullmatch(r"[0-9a-fA-F]{40}", identity):
@@ -81,6 +93,28 @@ if identity != "-":
     )
     if identity.upper() not in identities.upper():
         p.error("configured signing identity is unavailable; refusing ad-hoc fallback")
+
+
+local = root / ".local"
+link = local / "AInauten Voice.app"
+if args.local:
+    target_file = local / "local-app-path"
+    target = (
+        pathlib.Path(target_file.read_text().strip()) if target_file.exists() else link
+    )
+    allowed_targets = [
+        link,
+        pathlib.Path("/Applications/AInauten Voice Dev.app"),
+        pathlib.Path.home() / "Applications/AInauten Voice Dev.app",
+    ]
+    if target not in allowed_targets:
+        raise SystemExit(
+            "Unexpected local app destination; existing files were preserved"
+        )
+    if target != link and link.exists() and not link.is_symlink():
+        raise SystemExit(
+            "The local app link is occupied; existing files were preserved"
+        )
 
 
 def run(*cmd):
@@ -117,8 +151,15 @@ build = pathlib.Path(
     ).strip()
 )
 stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-out = root / "artifacts" / stamp
-out.mkdir(parents=True)
+if args.local:
+    local.mkdir(exist_ok=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    out = pathlib.Path(
+        tempfile.mkdtemp(prefix=".ainauten-voice-build-", dir=target.parent)
+    )
+else:
+    out = root / "artifacts" / stamp
+    out.mkdir(parents=True)
 app = out / "AInauten Voice.app"
 contents = app / "Contents"
 for name in ["MacOS", "Frameworks", "Resources"]:
@@ -259,16 +300,15 @@ run(
 run("codesign", "--verify", "--deep", "--strict", str(app))
 if args.local:
     verify_runtime(app)
-    local = root / ".local"
-    local.mkdir(exist_ok=True)
-    link = local / app.name
-    if link.exists() and not link.is_symlink():
-        raise SystemExit(
-            "The local app path is occupied; existing files were preserved"
-        )
-    prepared_link = local / ("prepared-app-" + stamp)
-    prepared_link.symlink_to(os.path.relpath(app, local))
-    prepared_link.replace(link)
+    try:
+        app = replace_local_app(app, target, legacy_link=link)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        raise SystemExit(str(error)) from error
+    if target != link:
+        prepared_link = local / ("prepared-app-" + stamp)
+        prepared_link.symlink_to(target)
+        prepared_link.replace(link)
+    shutil.rmtree(out)
 else:
     dmg = create_dmg(app, out)
 if args.install:

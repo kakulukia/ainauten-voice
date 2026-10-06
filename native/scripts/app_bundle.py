@@ -12,6 +12,50 @@ import plistlib
 import subprocess
 
 
+def replace_local_app(app, target, legacy_link=None):
+    """Replace only an inactive local build, restoring it if replacement fails."""
+    app, target = Path(app), Path(target)
+    if target.is_symlink() and target != legacy_link:
+        raise ValueError(
+            "The local app destination is a symlink; existing files were preserved"
+        )
+    previous = app.parent / "previous.app"
+    if previous.exists() or previous.is_symlink():
+        raise ValueError("The backup path is occupied; existing files were preserved")
+    had_previous = target.exists() or target.is_symlink()
+    if had_previous:
+        info = plistlib.loads((target / "Contents/Info.plist").read_bytes())
+        if (
+            info.get("CFBundleIdentifier") != "com.mediapublishing.VoiceWispr"
+            or info.get("AInautenLocalBuild") is not True
+            or info.get("CFBundleExecutable") != "VoiceWispr"
+        ):
+            raise ValueError(
+                "The destination is not a local AInauten build; existing files were preserved"
+            )
+        running = subprocess.run(
+            ["lsof", "-t", str(target / "Contents/MacOS/VoiceWispr")],
+            capture_output=True,
+            timeout=10,
+        )
+        if running.returncode != 1 or running.stderr.strip():
+            raise ValueError(
+                "Die lokale App zuerst beenden. Der geprüfte neue Build bleibt unter "
+                + str(app)
+            )
+        target.rename(previous)
+    try:
+        app.rename(target)
+        verify_runtime(target)
+    except Exception:
+        if target.exists():
+            target.rename(app)
+        if had_previous:
+            previous.rename(target)
+        raise
+    return target
+
+
 def load_commands(binary):
     libraries = subprocess.check_output(['otool', '-arch', 'arm64', '-L', str(binary)], text=True)
     dependencies = [line.strip().split(' (compatibility version', 1)[0]

@@ -9,7 +9,8 @@ enum FormattingWindow {
         let prefixOutput: String
         let input: String
     }
-    static func continuation(previous: FormattingRevision.Cache, next: String, maximumWords: Int = 80, preservePrefix: Bool = false) -> Window? {
+    static func continuation(previous: FormattingRevision.Cache, next: String, maximumWords: Int = 80, preservePrefix: Bool = false, maximumSentences: Int = 2) -> Window? {
+        precondition(maximumSentences > 0)
         guard previous.formatted,
               previous.output.rangeOfCharacter(from: CharacterSet(charactersIn: "[]{}<>`")) == nil,
               (try? LocalFormatter.validate(previous.output, original: previous.input, vocabulary: [])) != nil else { return nil }
@@ -25,10 +26,10 @@ enum FormattingWindow {
         tokenizer.string = output
         var starts: [String.Index] = []
         tokenizer.enumerateTokens(in: output.startIndex..<output.endIndex) { range, _ in starts.append(range.lowerBound); return true }
-        if old.count <= available, !preservePrefix, starts.count <= 2 {
+        if old.count <= available, !preservePrefix, starts.count <= maximumSentences {
             return Window(prefixInput: "", prefixOutput: "", input: input.trimmingCharacters(in: .whitespacesAndNewlines) + " " + next)
         }
-        for start in starts.suffix(2) {
+        for start in starts.suffix(maximumSentences) {
             if preservePrefix, start == output.startIndex { continue }
             let suffix = String(output[start...])
             guard let suffixAtoms = try? FormattingGrammar.atoms(suffix), suffixAtoms.count <= available,

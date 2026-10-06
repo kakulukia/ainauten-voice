@@ -49,6 +49,7 @@ public actor ProcessingPipeline {
     private let checkpointMinimumSamples: Int
     private let checkpointIntervalSamples: Int
     private let observeCheckpoint: (@Sendable (Int, Bool) -> Void)?
+    private let preserveCompletedSentences: Bool
     private var sessionID: UUID?
     private var generation = UUID()
     private var formatterGeneration = UUID()
@@ -91,7 +92,7 @@ public actor ProcessingPipeline {
     public private(set) var replacedSamples = 0
     private var progress: Progress?
     private let maxFormattingBacklog = 4
-    public init(speech: SpeechTranscribing, formatter: TextFormatting, coreSamples: Int = 224_000, overlapSamples: Int = 8000, observeSegment: (@Sendable (Range<Int>, TranscriptSegment) -> Void)? = nil, checkpointMinimumSamples: Int = 720_000, checkpointIntervalSamples: Int = 240_000, observeCheckpoint: (@Sendable (Int, Bool) -> Void)? = nil) {
+    public init(speech: SpeechTranscribing, formatter: TextFormatting, coreSamples: Int = 224_000, overlapSamples: Int = 8000, observeSegment: (@Sendable (Range<Int>, TranscriptSegment) -> Void)? = nil, checkpointMinimumSamples: Int = 720_000, checkpointIntervalSamples: Int = 240_000, observeCheckpoint: (@Sendable (Int, Bool) -> Void)? = nil, preserveCompletedSentences: Bool = false) {
         precondition(coreSamples >= 16_000 && overlapSamples >= 0 && coreSamples + 2 * overlapSamples <= 240_000, "ASR window including overlap must be at most fifteen seconds")
         self.speech = speech; self.baseFormatter = formatter; self.formatter = formatter; self.activity = speech as? any SpeechActivityDetecting
         self.observeSegment = observeSegment
@@ -100,6 +101,7 @@ public actor ProcessingPipeline {
         precondition(checkpointMinimumSamples > 240_000 && checkpointIntervalSamples > 0)
         self.checkpointMinimumSamples = checkpointMinimumSamples; self.checkpointIntervalSamples = checkpointIntervalSamples
         self.observeCheckpoint = observeCheckpoint
+        self.preserveCompletedSentences = preserveCompletedSentences
     }
 
     public func start(sessionID: UUID = UUID(), style: TextStyle, dictionary entries: [DictionaryEntry] = []) async throws {
@@ -203,7 +205,7 @@ public actor ProcessingPipeline {
                        let plan = FormattingRevision.plan(target: target, cache: cache) {
                         let formatter = self.formatter, style = self.style, dictionary = self.dictionary
                         let revision = Task { () throws -> (String, Bool) in
-                            try await FormattingRevision.render(plan: plan, target: target, formatter: formatter, style: style, dictionary: dictionary)
+                            try await FormattingRevision.render(plan: plan, target: target, formatter: formatter, style: style, dictionary: dictionary, preserveCompletedSentences: self.preserveCompletedSentences)
                         }
                         revisionTask = revision
                         do {
@@ -302,7 +304,7 @@ public actor ProcessingPipeline {
             guard verified.sessionID == id, !verified.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceError.message("Ungültiger Aufnahme-Abgleich") }
             let target = dictionary.replace(in: verified.text)
             let plan = FormattingRevision.plan(target: target, cache: cachedFormatting(through: end)) ?? FormattingRevision.coldPlan(target: target)
-            let output = try await FormattingRevision.render(plan: plan, target: target, formatter: formatter, style: style, dictionary: dictionary)
+            let output = try await FormattingRevision.render(plan: plan, target: target, formatter: formatter, style: style, dictionary: dictionary, preserveCompletedSentences: preserveCompletedSentences)
             try ensureCheckpoint(token, checkpointToken)
             if !output.1 { checkpoint = Checkpoint(sampleEnd: end, transcript: verified, cache: .init(input: target, output: output.0, formatted: true)); checkpointFailures = 0 }
             else { checkpointFailures += 1 }
@@ -557,7 +559,7 @@ public actor ProcessingPipeline {
                     do {
                         if rendered.count == formattingCache.count,
                            let previous = formattingCache.last, rendered.last == previous.value.output {
-                            continuation = FormattingWindow.continuation(previous: previous.value, next: job.text)
+                            continuation = FormattingWindow.continuation(previous: previous.value, next: job.text, maximumSentences: preserveCompletedSentences ? 1 : 2)
                         }
                         let input = continuation?.input ?? job.text
                         let context = continuation.map { rendered.dropLast().joined(separator: " ") + " " + $0.prefixOutput }

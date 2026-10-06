@@ -285,10 +285,10 @@ private final class CheckpointMeasurements: @unchecked Sendable {
         let warmAudio = try AudioConverter().resampleAudioFile(URL(fileURLWithPath: selected[0].audio))
         // Warm the complete first public fixture through the same bounded pipeline.
         // It remains in all three measured repetitions; no reference is a prompt.
-        let warmPipeline = ProcessingPipeline(speech: speech, formatter: needsFormatting ? local : OriginalFormatter(), coreSamples: Int(coreSeconds(arguments) * 16000), overlapSamples: Int(overlapSeconds(arguments) * 16000))
+        let warmPipeline = ProcessingPipeline(speech: speech, formatter: needsFormatting ? local : OriginalFormatter(), coreSamples: Int(coreSeconds(arguments) * 16000), overlapSamples: Int(overlapSeconds(arguments) * 16000), preserveCompletedSentences: arguments.contains("--preserve-completed-sentences"))
         _ = try await warmPipeline.process(samples: warmAudio, sessionID: UUID(), style: needsFormatting ? .cleaned : .original)
         try jsonLine(["event": "suite-start", "source": manifest.source, "coreSeconds": coreSeconds(arguments), "overlapSeconds": overlapSeconds(arguments), "vadSilenceSeconds": vadSilence(arguments), "trimTrailingSilence": arguments.contains("--trim-tail"), "encoderPrecision": arguments.contains("--encoder-v2") ? "int8-v2" : "int8", "sdkWorkers": speechConfiguration.sdkWorkers, "dualDecodeArbitration": speechConfiguration.dualDecodeArbitration, "reconciliationContextSeconds": 8, "boundedReconciliationAboveSeconds": 600, "humanAcceptance": false, "fixtures": selected.count, "repeats": repeats, "streamedAtRealTime": streaming, "loadAndWarmSeconds": ProcessInfo.processInfo.systemUptime - loadStarted,
-                      "normalizationNotes": manifest.normalizationNotes, "hardware": "Run host; see machine receipt. Other simultaneous processes may affect latency.", "feedPacing": "append-after-capture-deadline", "feedChunkSamples": 1600, "latencyClock": "logical-capture-end-including-feed-lag", "warmupScope": "complete-first-fixture-pipeline-ungraded-no-case-exclusion"])
+                      "preserveCompletedSentences": arguments.contains("--preserve-completed-sentences"), "normalizationNotes": manifest.normalizationNotes, "hardware": "Run host; see machine receipt. Other simultaneous processes may affect latency.", "feedPacing": "append-after-capture-deadline", "feedChunkSamples": 1600, "latencyClock": "logical-capture-end-including-feed-lag", "warmupScope": "complete-first-fixture-pipeline-ungraded-no-case-exclusion"])
         var successful: [SuiteMeasurement] = [], failures = 0
         for fixture in selected {
             if let expected = fixture.audioSHA256 {
@@ -300,7 +300,7 @@ private final class CheckpointMeasurements: @unchecked Sendable {
                 for run in 1...repeats {
                     let formatter: any TextFormatting = style == .original ? OriginalFormatter() : local
                     let checkpoints = CheckpointMeasurements()
-                    let pipeline = ProcessingPipeline(speech: speech, formatter: formatter, coreSamples: Int(coreSeconds(arguments) * 16000), overlapSamples: Int(overlapSeconds(arguments) * 16000), checkpointMinimumSamples: arguments.contains("--no-checkpoints") ? AudioCaptureBuffer.maximumSamples + 1 : 720_000, observeCheckpoint: { checkpoints.record($0, $1) })
+                    let pipeline = ProcessingPipeline(speech: speech, formatter: formatter, coreSamples: Int(coreSeconds(arguments) * 16000), overlapSamples: Int(overlapSeconds(arguments) * 16000), checkpointMinimumSamples: arguments.contains("--no-checkpoints") ? AudioCaptureBuffer.maximumSamples + 1 : 720_000, observeCheckpoint: { checkpoints.record($0, $1) }, preserveCompletedSentences: arguments.contains("--preserve-completed-sentences"))
                     do {
                         try await pipeline.start(sessionID: UUID(), style: style, dictionary: entries)
                         let began = ProcessInfo.processInfo.systemUptime
@@ -328,6 +328,7 @@ private final class CheckpointMeasurements: @unchecked Sendable {
                                       "strictOriginalWordEdits": Int((strict * Double(reference.count)).rounded()), "canonicalOriginalWordEdits": Int((canonical * Double(canonicalReference.count)).rounded()),
                                       "reference": useSettingsDictionary ? NSNull() : fixture.reference as Any, "original": useSettingsDictionary ? NSNull() : result.original as Any, "text": useSettingsDictionary ? NSNull() : result.text as Any, "contentsLogged": !useSettingsDictionary, "usedFallback": result.usedFallback,
                                       "recordingCheckpoints": checkpoints.snapshot(),
+                                      "processing": try result.processing.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull(),
                                       "recognitionComplete": result.isComplete, "formatterAttempted": style != .original, "entireResultFormatted": result.isComplete && style != .original && !result.usedFallback,
                                       "resultProcessingStatus": !result.isComplete ? "recognition-partial" : style == .original ? "original-successful" : result.usedFallback ? "formatting-fallback-partial-or-full" : "formatted-successful",
                                       "referenceNegations": useSettingsDictionary ? NSNull() : negations(reference) as Any, "recognizedNegations": useSettingsDictionary ? NSNull() : negations(recognized) as Any, "formattedNegations": useSettingsDictionary ? NSNull() : negations(formatted) as Any,

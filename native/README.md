@@ -54,15 +54,19 @@ Die laufende AInauten Voice über ihr App-Menü beenden, dann im Ordner `native`
 Einmalig und nach Quellcodeänderungen den lokalen Build im Ordner `native` vorbereiten:
 
 ```sh
-python3 scripts/package.py --local --adhoc \
+python3 scripts/package.py --local \
   --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk \
   --build-system native \
   --uv '/Applications/AInauten Voice.app/Contents/Resources/LipReading/uv'
 ```
 
-Dieser Befehl verwendet das auf dem Entwicklungsgerät vorhandene kompatible SDK und den bereits installierten uv 0.12.5. Bei vorhandener fester Signieridentität wird diese auch mit `--adhoc` weiterverwendet. Ohne diese Identität ist der lokale Build ad hoc signiert und macOS kann erneut nach Mikrofon- und Bedienungshilfenfreigaben fragen. Diese Freigaben bewusst selbst bestätigen.
+Dieser Befehl verwendet das auf dem Entwicklungsgerät vorhandene kompatible SDK und den bereits installierten uv 0.12.5. Für lokale Builds wird bevorzugt die feste Testsignatur aus `.local/local-signing-identity` verwendet; andernfalls gilt die vorhandene Release-Signatur aus `.local/signing-identity`. Beide Dateien enthalten ausschließlich den öffentlichen Zertifikatsfingerabdruck; der private Schlüssel bleibt im macOS-Schlüsselbund. Die Testsignatur wird für Release-Pakete nicht automatisch verwendet.
 
-Das geprüfte Bundle liegt unter `artifacts/`; `.local/AInauten Voice.app` verweist auf den letzten erfolgreichen lokalen Build. Er hat keinen Updatekanal, sodass ein öffentliches Update ihn nicht ersetzt. Modelle, Wörterbuch, Einstellungen und Schlüsselbunddienste werden weiterverwendet.
+Beim Wechsel von einer Ad-hoc-Signatur oder einer anderen Signieridentität müssen Mikrofon und Bedienungshilfen erneut bewusst freigegeben werden. Weitere lokale Builds mit derselben Testsignatur und unveränderter Bundle-ID können diese Freigaben weiterverwenden. Vorhandene Freigaben sind erst nach einem praktischen Mikrofon-/Bedienungshilfentest bestätigt. Ohne verfügbare feste Signatur bricht der Build ab. `--adhoc` ist nur eine ausdrückliche Ausnahme für Testbuilds und kann erneute Freigaben bei jedem Neubau verursachen.
+
+Lokale Builds werden zuerst in einem temporären Ordner signiert und geprüft und ersetzen anschließend das Bundle am festen Ablageort. Der Pfad steht in `.local/local-app-path`; unterstützt sind `/Applications/AInauten Voice Dev.app`, `~/Applications/AInauten Voice Dev.app` als ausgeschriebener absoluter Pfad und der Projektpfad `.local/AInauten Voice.app`. Ohne diese Datei gilt der Projektpfad. Der Starter verwendet weiterhin `.local/AInauten Voice.app`, bei einem externen Ablageort als Verknüpfung. Eine laufende Testversion wird nicht ersetzt. Erfolgreiche lokale Builds erzeugen keine neuen Artefakt-Ordner; ältere vorhandene Builds bleiben erhalten.
+
+Der lokale Build hat keinen Updatekanal, sodass ein öffentliches Update ihn nicht ersetzt. Modelle, Wörterbuch, Einstellungen und Schlüsselbunddienste werden weiterverwendet.
 
 Vor der ersten Umstellung eines Schema-1-Verlaufs sichert der Starter Verlauf und Einstellungen unter `.local/backups/before-history-v2/`. Die installierte Version 0.1.4 kann den neuen Schema-2-Verlauf nicht lesen. Für eine Rückkehr zur alten Version zunächst beide Apps beenden und die gesicherte Datenbank wiederherstellen; seitdem hinzugekommene Diktate vorher aus der lokalen App exportieren. Sicherung und Builds sind privat und werden von Git ignoriert.
 
@@ -73,6 +77,10 @@ Einfügung nur in unveränderte, lesbare AX-Ziele. Bestätigung verlangt komplet
 Einstellungen und Wörterbuch: `~/Library/Application Support/Voice Wispr/settings.json`, atomar, versioniertes Exportformat. API-Schlüssel ausschließlich Keychain. Audio und die fünf letzten Resultate für den Schnellzugriff bleiben im Speicher. Bei eingeschaltetem Verlauf werden Diktattexte zusätzlich lokal in history.sqlite gespeichert; das lässt sich in der App abschalten. SDK-Transkript-Diagnosen und llama-Logs sind deaktiviert. Die App liest den fokussierten Text ausschließlich für lokale Zustellungsprüfung; er wird weder an ein Sprachmodell noch an Cloud gesendet.
 
 Neue Sprachdiktate zeigen in Übersicht und Verlauf die Verarbeitungsdauer ab Aufnahmeende bis zum fertigen Text, ohne die anschließende Einfügung. Die Detailansicht trennt Modellvorbereitung, Erkennung einschließlich Abgleich und Textoptimierung. Zeiten während der Aufnahme zählen nicht zur Wartezeit; gleichzeitig laufende Schritte können sich überlappen. Modellaufrufe werden auch während der Aufnahme gezählt. Der Optimierungsstatus unterscheidet ausgeführte Modellaufrufe, automatisch übersprungene Optimierung, Original-Stil, bewusst angeforderten Originaltext und einen Rückfall bei Problemen. Ältere Einträge und Ergebnisse ohne Messung bleiben als nicht gemessen erkennbar. Schema 2 ergänzt nur optionale Messdaten; Schema-1-Verläufe werden ohne Änderung ihrer Texte und Markierungen übernommen.
+
+Die lokale Qwen-Optimierung arbeitet weiter während der Aufnahme. Beim folgenden Abschnitt wird nur der letzte Satz des bereits bearbeiteten Textes erneut geöffnet; ältere Sätze bleiben im geprüften Cache. Die Satzgrenzen stammen aus dem bearbeiteten Text und sind eine Heuristik, keine garantierte Prüfung grammatischer Vollständigkeit. Der abschließende Erkennungsabgleich, Wortlautprüfung, Wörterbuch, Originaltext und sichtbare Rückfälle bleiben erhalten. Cloud-Optimierung nutzt weiterhin das bisherige Fenster von bis zu zwei vorherigen Sätzen.
+
+Die Probe vergleicht diese Variante auf derselben gekennzeichneten Audio-Fixture mit `suite ... --stream --preserve-completed-sentences`; ohne den Schalter gilt das bisherige Fenster. Die Receipts enthalten zusätzlich die Verarbeitungsmessung einschließlich tatsächlicher Modellaufrufe. Synthetische Aufnahmen belegen den Vergleich auf diesem Beispiel, keine allgemeine Diktatqualität.
 
 ## Stand und Nachweise
 
