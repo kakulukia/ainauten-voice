@@ -48,17 +48,26 @@ cases = [
         "stable signing identity missing",
     ),
     ("explicit ad-hoc", ["--local", "--adhoc"], None, None, "", "BUILD_REACHED"),
+    (
+        "publisher pin outside local mode",
+        ["--sign-identity", override],
+        local,
+        release,
+        override,
+        "signing identity differs from the reviewed publisher pin",
+    ),
 ]
 
 with tempfile.TemporaryDirectory(prefix="ainauten-package-signing-check-") as temporary:
     root = pathlib.Path(temporary)
-    for name in ["scripts", ".local", "docs", "bin"]:
+    for name in ["scripts", ".local", "docs", "bin", "Resources"]:
         (root / name).mkdir()
     for name in ["package.py", "package_dmg.py", "app_bundle.py"]:
         shutil.copyfile(scripts / name, root / "scripts" / name)
     (root / "docs/user-verification-report.md").write_text(
         "# AInauten Voice: Prüfbericht\n"
     )
+    (root / "Resources/release-signing-fingerprint.txt").write_text(release + "\n")
     # Stop before compiling or signing; only packaging preflight runs.
     (root / "scripts/bootstrap.py").write_text(
         "print('BUILD_REACHED')\nraise SystemExit(73)\n"
@@ -84,7 +93,7 @@ with tempfile.TemporaryDirectory(prefix="ainauten-package-signing-check-") as te
             AINAUTEN_CHECK_IDENTITIES=available,
         )
         result = subprocess.run(
-            [sys.executable, str(root / "scripts/package.py"), *flags],
+            [sys.executable, str(root / "scripts/package.py"), "--development", *flags],
             env=env,
             capture_output=True,
             text=True,
@@ -102,7 +111,7 @@ with tempfile.TemporaryDirectory(prefix="ainauten-package-signing-check-") as te
     (root / ".local/local-app-path").write_text(str(root / "outside.app") + "\n")
     env["AINAUTEN_CHECK_IDENTITIES"] = local
     result = subprocess.run(
-        [sys.executable, str(root / "scripts/package.py"), "--local"],
+        [sys.executable, str(root / "scripts/package.py"), "--development", "--local"],
         env=env,
         capture_output=True,
         text=True,
@@ -116,3 +125,15 @@ with tempfile.TemporaryDirectory(prefix="ainauten-package-signing-check-") as te
     ):
         raise SystemExit("FAIL unexpected local destination: " + output)
     print("PASS unexpected local destination rejected before building")
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts/package.py"), "--local"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode == 0 or "--local requires --development" not in result.stderr:
+        raise SystemExit(
+            "FAIL local mode requires explicit development: " + result.stderr
+        )
+    print("PASS local mode requires explicit development")
