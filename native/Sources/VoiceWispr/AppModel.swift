@@ -592,6 +592,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     private func updateActivationPolicy() {
         let policy: NSApplication.ActivationPolicy = document.settings.menuBarOnly == true ? .accessory : .regular
         if NSApp.activationPolicy() != policy { NSApp.setActivationPolicy(policy) }
+        makeMenu()
     }
     private var interfaceLanguageObserver: NSObjectProtocol?
     private func interfaceLanguageChanged() {
@@ -621,8 +622,10 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         let reportItem = NSMenuItem(title: L10n.text("menu.report"), action: #selector(openReportHelp), keyEquivalent: "")
         reportItem.target = self; appMenu.addItem(reportItem)
         appMenu.addItem(.separator())
-        let hideItem = NSMenuItem(title: L10n.text("menu.hide"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        hideItem.target = NSApplication.shared; appMenu.addItem(hideItem)
+        let menuBarOnly = document.settings.menuBarOnly == true
+        let hideItem = NSMenuItem(title: L10n.text(menuBarOnly ? "window.close" : "menu.hide"),
+            action: menuBarOnly ? #selector(NSWindow.performClose(_:)) : #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        hideItem.target = menuBarOnly ? nil : NSApplication.shared; appMenu.addItem(hideItem)
         appMenu.addItem(.separator())
         let quitItem = NSMenuItem(title: L10n.text("menu.quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self; appMenu.addItem(quitItem); appItem.submenu = appMenu
