@@ -3,6 +3,64 @@ import ApplicationServices
 @testable import VoiceWisprCore
 
 final class GestureTests: XCTestCase {
+    @MainActor func testTapTimeoutKeepsModifierHoldAfterCharacterRelease() throws {
+        let hotkey = GlobalHotkey(); hotkey.enabled = true
+        hotkey.shortcut = Shortcut(keyCode: 49, modifiers: (1 << 18) | (1 << 19))
+        var actions: [DictationGesture] = []; hotkey.onGesture = { actions.append($0) }
+        let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: true))
+        down.flags = [.maskControl, .maskAlternate]
+        _ = hotkey.handle(.keyDown, event: down)
+        hotkey.recoverAfterTapTimeout(flags: .maskControl, keyIsDown: { _ in false })
+        XCTAssertEqual(actions, [.start])
+        hotkey.recoverAfterTapTimeout(flags: .maskShift, keyIsDown: { _ in true })
+        XCTAssertEqual(actions, [.start, .stop])
+    }
+    @MainActor func testTapTimeoutFinishesAReleasedHoldExactlyOnce() throws {
+        let hotkey = GlobalHotkey(); hotkey.enabled = true
+        hotkey.shortcut = Shortcut(keyCode: 49, modifiers: 1 << 20)
+        var actions: [DictationGesture] = []; hotkey.onGesture = { actions.append($0) }
+        let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: true)); down.flags = .maskCommand
+        _ = hotkey.handle(.keyDown, event: down)
+        hotkey.recoverAfterTapTimeout(flags: .maskCommand, keyIsDown: { _ in false })
+        hotkey.recoverAfterTapTimeout(flags: [], keyIsDown: { _ in false })
+        XCTAssertEqual(actions, [.start, .stop])
+    }
+    @MainActor func testTapTimeoutPreservesAStillHeldShortcut() throws {
+        let hotkey = GlobalHotkey(); hotkey.enabled = true
+        hotkey.shortcut = Shortcut(keyCode: 49, modifiers: 1 << 20)
+        var actions: [DictationGesture] = []; hotkey.onGesture = { actions.append($0) }
+        let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: true)); down.flags = .maskCommand
+        _ = hotkey.handle(.keyDown, event: down)
+        hotkey.recoverAfterTapTimeout(flags: .maskCommand, keyIsDown: { _ in true })
+        XCTAssertEqual(actions, [.start])
+        hotkey.recoverAfterTapTimeout(flags: [], keyIsDown: { _ in false })
+        XCTAssertEqual(actions, [.start, .stop])
+    }
+    @MainActor func testTapTimeoutReconcilesModifierOnlyHold() throws {
+        let hotkey = GlobalHotkey(); hotkey.enabled = true
+        hotkey.shortcut = Shortcut(keyCode: nil, modifiers: 1 << 23)
+        var actions: [DictationGesture] = []; hotkey.onGesture = { actions.append($0) }
+        let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 63, keyDown: true)); down.flags = .maskSecondaryFn
+        _ = hotkey.handle(.flagsChanged, event: down)
+        hotkey.recoverAfterTapTimeout(flags: .maskSecondaryFn, keyIsDown: { _ in false })
+        XCTAssertEqual(actions, [.start])
+        hotkey.recoverAfterTapTimeout(flags: [], keyIsDown: { _ in true })
+        XCTAssertEqual(actions, [.start, .stop])
+    }
+    @MainActor func testTapTimeoutDoesNotStopHandsFreeOrProcessing() throws {
+        let hotkey = GlobalHotkey(); hotkey.enabled = true
+        hotkey.shortcut = Shortcut(keyCode: nil, modifiers: 1 << 23)
+        var actions: [DictationGesture] = []; hotkey.onGesture = { actions.append($0) }
+        let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 63, keyDown: true)); down.flags = .maskSecondaryFn
+        let up = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 63, keyDown: false)); up.flags = []
+        _ = hotkey.handle(.flagsChanged, event: down); _ = hotkey.handle(.flagsChanged, event: up)
+        _ = hotkey.handle(.flagsChanged, event: down)
+        hotkey.recoverAfterTapTimeout(flags: [], keyIsDown: { _ in false })
+        XCTAssertEqual(actions, [.start, .handsFree])
+        hotkey.enabled = false
+        hotkey.recoverAfterTapTimeout(flags: [], keyIsDown: { _ in false })
+        XCTAssertEqual(actions, [.start, .handsFree])
+    }
     @MainActor func testNativeCallbackConsumesSynchronouslyAndForwardsUnrelatedKeys() throws {
         let hotkey = GlobalHotkey(); hotkey.enabled = true
         hotkey.bindings.copyLast = [Shortcut(keyCode: 8, modifiers: (1 << 20) | (1 << 18))]
