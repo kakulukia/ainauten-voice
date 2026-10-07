@@ -10,6 +10,16 @@ p = argparse.ArgumentParser()
 p.add_argument("--debug", action="store_true")
 p.add_argument("--install", action="store_true")
 p.add_argument(
+    "--built-products",
+    type=pathlib.Path,
+    help="Resume explicit local beta packaging from this checkout's successful release build; no compilation",
+)
+p.add_argument(
+    "--local-beta",
+    action="store_true",
+    help="Explicit locally signed public beta; no Apple notarization, existing publisher pin required",
+)
+p.add_argument(
     "--sdk",
     type=pathlib.Path,
     help="Explicit compatible macOS SDK; leaves the system default unchanged",
@@ -53,6 +63,12 @@ p.add_argument(
     help="Existing uv 0.12.5 executable for the optional installer",
 )
 args = p.parse_args()
+if args.local_beta and (
+    args.development or args.adhoc or args.debug or args.notary_profile
+):
+    p.error(
+        "--local-beta cannot be combined with development, ad-hoc, debug or notarization modes"
+    )
 if args.local and not args.development:
     p.error("--local requires --development")
 if args.local and args.install:
@@ -63,7 +79,7 @@ if args.adhoc and not args.development:
     p.error("--adhoc requires --development; ad-hoc signing is never a public release")
 if args.debug and not args.development:
     p.error("--debug requires --development")
-if not args.development and not args.notary_profile:
+if not args.development and not args.local_beta and not args.notary_profile:
     p.error(
         "public packaging requires --notary-profile; use --development only for local testing"
     )
@@ -112,7 +128,7 @@ if identity != "-":
         p.error("configured signing identity is unavailable; refusing ad-hoc fallback")
 # Reject a local certificate before expensive builds. Certificate creation and
 # publisher-pin migration are separate, explicitly approved setup steps.
-if not args.development:
+if not args.development and not args.local_beta:
     valid = subprocess.check_output(
         ["security", "find-identity", "-v", "-p", "codesigning"], text=True
     )
@@ -121,7 +137,7 @@ if not args.development:
         p.error(
             "existing valid Developer ID Application identity required; local signing cannot be distributed"
         )
-timestamp_options = [] if args.development else ["--timestamp"]
+timestamp_options = [] if (args.development or args.local_beta) else ["--timestamp"]
 local = root / ".local"
 link = local / "AInauten Voice.app"
 if args.local:
@@ -165,18 +181,30 @@ if not report_text.startswith("# AInauten Voice: Prüfbericht") or any(
         "The user verification report is missing or contains internal data"
     )
 configuration = "debug" if args.debug else "release"
-run("python3", "scripts/bootstrap.py")
-build_options = (["--sdk", str(args.sdk)] if args.sdk else []) + (
-    ["--build-system", args.build_system] if args.build_system else []
-)
-run("swift", "build", *build_options, "-c", configuration, "-j", "4")
-build = pathlib.Path(
-    subprocess.check_output(
-        ["swift", "build", *build_options, "-c", configuration, "--show-bin-path"],
-        cwd=root,
-        text=True,
-    ).strip()
-)
+if args.built_products:
+    if not args.local_beta:
+        p.error("--built-products is only available for an explicit local beta")
+    build = args.built_products.resolve()
+    if (
+        build != (root / ".build/out/Products/Release").resolve()
+        or not (build / "VoiceWispr").is_file()
+    ):
+        p.error(
+            "--built-products must be this checkout's existing successful release products"
+        )
+else:
+    run("python3", "scripts/bootstrap.py")
+    build_options = (["--sdk", str(args.sdk)] if args.sdk else []) + (
+        ["--build-system", args.build_system] if args.build_system else []
+    )
+    run("swift", "build", *build_options, "-c", configuration, "-j", "4")
+    build = pathlib.Path(
+        subprocess.check_output(
+            ["swift", "build", *build_options, "-c", configuration, "--show-bin-path"],
+            cwd=root,
+            text=True,
+        ).strip()
+    )
 stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 if args.local:
     local.mkdir(exist_ok=True)
@@ -192,6 +220,13 @@ contents = app / "Contents"
 for name in ["MacOS", "Frameworks", "Resources"]:
     (contents / name).mkdir(parents=True)
 shutil.copy2(root / "Resources/Info.plist", contents / "Info.plist")
+info = plistlib.loads((contents / "Info.plist").read_bytes())
+info["AInautenDistributionMode"] = (
+    "local-beta"
+    if args.local_beta
+    else ("development" if args.development else "apple-notarized")
+)
+(contents / "Info.plist").write_bytes(plistlib.dumps(info))
 for language in ["de", "en"]:
     source = root / "Resources" / f"{language}.lproj"
     shutil.copytree(source, contents / "Resources" / source.name)
@@ -207,12 +242,20 @@ if public_key or args.local:
     (contents / "Info.plist").write_bytes(plistlib.dumps(info))
 shutil.copy2(build / "VoiceWispr", contents / "MacOS/VoiceWispr")
 for bundle in build.glob("*.bundle"):
-    shutil.copytree(bundle, contents / "Resources" / bundle.name)
+    target_bundle = contents / "Resources" / bundle.name
+    # Keep the established flat SwiftPM resource layout under both build engines.
+    resource_base = bundle / "Contents/Resources"
+    if resource_base.is_dir():
+        shutil.copytree(resource_base, target_bundle)
+        shutil.copy2(bundle / "Contents/Info.plist", target_bundle / "Info.plist")
+    else:
+        shutil.copytree(bundle, target_bundle)
 localized_bundles = list((contents / "Resources").glob("*.bundle"))
 for language in ["de", "en"]:
     if not any(
-        (bundle / f"{language}.lproj/Localizable.strings").is_file()
+        (base / f"{language}.lproj/Localizable.strings").is_file()
         for bundle in localized_bundles
+        for base in [bundle, bundle / "Contents/Resources"]
     ):
         raise SystemExit(f"Missing packaged interface language: {language}")
 framework = (
@@ -361,11 +404,13 @@ entitlements = (
     / "Resources"
     / ("Release.entitlements" if has_team else "LocalRelease.entitlements")
 )
-if not has_team and not args.development:
+if not has_team and not args.development and not args.local_beta:
     raise SystemExit("Developer ID Team ID missing; no public package produced")
 if not has_team:
     print(
-        "LOCAL DEVELOPMENT ONLY: library-validation exception; not distributable or Apple-notarized"
+        "LOCAL BETA: library-validation exception; NOT Apple-notarized"
+        if args.local_beta
+        else "LOCAL DEVELOPMENT ONLY: library-validation exception; not distributable or Apple-notarized"
     )
 run(
     "codesign",
@@ -395,7 +440,7 @@ if args.local:
         prepared_link.replace(link)
     shutil.rmtree(out)
 else:
-    if not args.development:
+    if not args.development and not args.local_beta:
         run(
             "python3",
             "scripts/notarize-release.py",
@@ -405,8 +450,12 @@ else:
             "--output",
             str(out / "notarization-app"),
         )
+    if args.local_beta:
+        from distribution_security import verify_local_beta_app
+
+        print("VERIFIED LOCAL BETA", verify_local_beta_app(app))
     dmg = create_dmg(app, out)
-    if not args.development:
+    if not args.development and not args.local_beta:
         # Apple checks the exact final DMG too; only Accepted may reach verification.
         run("codesign", "--force", *timestamp_options, "--sign", identity, str(dmg))
         result = subprocess.run(

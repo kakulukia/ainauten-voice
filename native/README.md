@@ -16,6 +16,10 @@ Vor dem DMG-Bau werden die Bibliothekspfade des arm64-Laufzeitprogramms und sein
 
 Beim Halten-Kürzel Strg+Z genügt es, die Kombination einmal zu drücken und anschließend nur Strg festzuhalten. Z darf losgelassen werden; das Diktat endet beim Loslassen von Strg. Für den Freihändig-Modus die vollständige Kombination zweimal kurz drücken und loslassen.
 
+## Menüleiste und Dock
+
+Unter **Diktieren → Nur in der Menüleiste anzeigen** lässt sich das Dock-Symbol sofort ausblenden. Die Auswahl bleibt nach einem Neustart erhalten. Einstellungen sind weiterhin über das Menüleistensymbol erreichbar; bestehende Profile zeigen das Dock-Symbol, bis die Option eingeschaltet wird.
+
 ## Entwickeln
 
 Command Line Tools mit Swift 6.2+ oder passendes Xcode, Python 3 nur für den Paketbau. Für die normale Agent-Installation nutze die geprüfte Download-Beta gemäß [Installationsanleitung](../docs/agent-installation.md). Der Paketbau des optionalen Forschungs-Installers setzt derzeit zusätzlich uv 0.12.5 aus Homebrew voraus; `scripts/package.py` prüft den festen Paketpfad. Endnutzer benötigen keine Entwicklungswerkzeuge und keinen separaten Server.
@@ -114,4 +118,4 @@ Der Prüfer aktiviert oder startet keine App und liest keine Diktate, Zwischenab
 
 ## Sicherheitsänderungen für den nächsten Kandidaten
 
-Der veröffentlichte Build 0.1.10 (14) ist weiterhin lokal signiert und nicht notarisiert. Neue öffentliche Pakete benötigen jetzt eine bestehende Apple Developer ID Application sowie `--notary-profile`; lokale Tests benötigen ausdrücklich `--development`. Automatische Zwischenablage-Nutzung ist im aktuellen Quellcode standardmäßig aus und erfordert Opt-in. Details und noch offene Apple-Einrichtung: [Sicherheitsnachprüfung](docs/security-followup-2026-10-06.md).
+Der veröffentlichte Build 0.1.11 (15) ist weiterhin lokal signiert und nicht notarisiert. Apple-notarisierte Pakete benötigen eine bestehende Developer ID Application und `--notary-profile`. Die ausdrücklich freigegebene, nicht notarisierte Beta verwendet `--local-beta` in Paket-, Update- und Website-Build. Lokale Tests verwenden `--development`; dieser Modus ist kein Veröffentlichungsweg. Automatische Zwischenablage-Nutzung ist im aktuellen Quellcode standardmäßig aus und erfordert Opt-in. Details und noch offene Apple-Einrichtung: [Sicherheitsnachprüfung](docs/security-followup-2026-10-06.md).
