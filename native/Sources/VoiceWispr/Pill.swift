@@ -98,7 +98,7 @@ struct PillView: View {
         .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
         .help(recordingWarning ? model.status : model.pillActionLabel)
         .padding(8)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.045), value: model.spectrumLevels)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.095), value: model.spectrumLevels)
     }
     private func barHeight(_ index: Int) -> CGFloat {
         return CGFloat(4.0 + 16.0 * Double(model.spectrumLevels[index]))

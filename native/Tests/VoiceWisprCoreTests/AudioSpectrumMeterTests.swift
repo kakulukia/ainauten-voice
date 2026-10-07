@@ -7,31 +7,38 @@ final class AudioSpectrumMeterTests: XCTestCase {
     }
 
     func testEqualVolumeTonesDriveDifferentFrequencyBands() {
-        for (frequency, band) in [(125.0, 0), (750.0, 4), (3000.0, 7)] {
+        for (frequency, band) in [(62.5, 0), (187.5, 4), (437.5, 8)] {
             let levels = AudioSpectrumMeter().levels(for: tone(frequency))
             XCTAssertEqual(levels.count, 9)
             XCTAssertEqual(levels.firstIndex(of: levels.max()!), band)
-            XCTAssertGreaterThan(levels[band], 0.65)
+            XCTAssertGreaterThan(levels[band], 0.55)
             XCTAssertLessThan(levels[(band + 4) % 9], 0.1)
         }
     }
 
     func testQuietTonesHaveVisiblePeaksWithoutSaturating() {
-        let levels = AudioSpectrumMeter().levels(for: tone(750, amplitude: 0.005))
+        let levels = AudioSpectrumMeter().levels(for: tone(187.5, amplitude: 0.005))
         XCTAssertGreaterThan(levels[4], 0.35)
         XCTAssertLessThan(levels[4], 0.8)
     }
 
     func testMixedTonesShowSeparateLowAndHighPeaks() {
-        let samples = zip(tone(125), tone(3000)).map(+)
+        let samples = zip(tone(62.5), tone(437.5)).map(+)
         let levels = AudioSpectrumMeter().levels(for: samples)
-        XCTAssertGreaterThan(levels[0], 0.65)
-        XCTAssertGreaterThan(levels[7], 0.65)
+        XCTAssertGreaterThan(levels[0], 0.55)
+        XCTAssertGreaterThan(levels[8], 0.65)
         XCTAssertLessThan(levels[4], 0.1)
     }
 
+    func testAcceptedBassReductionPreservesCalibratedQuietPeak() {
+        // Reference captured from the accepted demo with 40...500 Hz and 5 dB bass reduction.
+        let levels = AudioSpectrumMeter().levels(for: tone(62.5, amplitude: 0.005))
+        XCTAssertEqual(Double(levels[0]), 0.2494278, accuracy: 0.00001)
+        XCTAssertEqual(Double(levels[1]), 0.1147409, accuracy: 0.00001)
+    }
+
     func testSmallCallbacksMatchACompleteAudioWindow() {
-        let samples = tone(750)
+        let samples = tone(187.5)
         let meter = AudioSpectrumMeter()
         var levels: [Float] = []
         for start in stride(from: 0, to: 512, by: 128) {
@@ -40,13 +47,18 @@ final class AudioSpectrumMeterTests: XCTestCase {
         XCTAssertEqual(levels, AudioSpectrumMeter().levels(for: samples))
     }
 
+    func testHighTonesOutsideTheVoiceDisplayDoNotCreateFalsePeaks() {
+        let levels = AudioSpectrumMeter().levels(for: tone(4000))
+        XCTAssertTrue(levels.allSatisfy { $0 < 0.1 })
+    }
+
     func testSilenceEmptyAndInvalidSamplesStayFiniteAndBounded() {
         let meter = AudioSpectrumMeter()
-        _ = meter.levels(for: tone(750))
+        _ = meter.levels(for: tone(187.5))
         for samples: [Float] in [[Float](repeating: 0, count: 512), [], [.nan, .infinity, -.infinity]] {
             let levels = meter.levels(for: samples)
             XCTAssertEqual(levels, [Float](repeating: 0, count: 9))
         }
-        XCTAssertTrue(meter.levels(for: tone(750, amplitude: 1)).allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1 })
+        XCTAssertTrue(meter.levels(for: tone(187.5, amplitude: 1)).allSatisfy { $0.isFinite && $0 >= 0 && $0 <= 1 })
     }
 }
