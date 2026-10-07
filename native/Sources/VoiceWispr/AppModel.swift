@@ -201,6 +201,8 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     /// A new feedback generation invalidates old timers, independent of translation.
     private var statusRevision: UInt64 = 0
     @Published var level: Float = 0
+    @Published private(set) var spectrumLevels = [Float](repeating: 0, count: AudioSpectrumMeter.bandCount)
+    private var spectrumMeter = AudioSpectrumMeter()
     @Published var captureReady = false
     /// Start request to the first normalized microphone block, not keydown or UI rendering.
     @Published var captureStartupMilliseconds: Double?
@@ -878,6 +880,8 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         practiceStopper = PracticeSession()
         let targetPID = practice ? nil : NSWorkspace.shared.frontmostApplication?.processIdentifier
         focus = nil
+        spectrumMeter = AudioSpectrumMeter()
+        spectrumLevels = [Float](repeating: 0, count: AudioSpectrumMeter.bandCount)
         state = .recording; hotkey.cancellationEnabled = !practice && accessibilityGranted; level = 0; elapsed = 0; captureReady = false; captureStartupMilliseconds = nil
         updateLipHotkey()
         #if DEBUG
@@ -925,6 +929,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                         self.receivedCaptureAudio(session: id, offset: offset, count: samples.count, receivedAt: receivedAt, requestedAt: requestedAt)
                         self.pendingSamples[offset] = samples
                         while let contiguous = self.pendingSamples.removeValue(forKey: self.acceptedSamples) {
+                            self.spectrumLevels = self.spectrumMeter.levels(for: contiguous)
                             self.acceptedSamples += contiguous.count
                             let prior = self.appendTask
                             let initialization = self.operation
