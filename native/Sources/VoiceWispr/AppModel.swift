@@ -187,6 +187,8 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     @Published var state: PillState = .loading { didSet { updatePillVisibility(); if state != oldValue { announceState() } } }
     @Published var status = "Einrichtung abschließen"
     @Published var level: Float = 0
+    @Published private(set) var spectrumLevels = [Float](repeating: 0, count: AudioSpectrumMeter.bandCount)
+    private var spectrumMeter = AudioSpectrumMeter()
     @Published var captureReady = false
     @Published var captureStartupMilliseconds: Double?
     @Published var elapsed: TimeInterval = 0
@@ -750,6 +752,8 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         if practice { practiceFeedback.begin(id) }
         practiceStopper = PracticeSession()
         focus = practice ? nil : FocusSnapshot.capture(); pill?.position()
+        spectrumMeter = AudioSpectrumMeter()
+        spectrumLevels = [Float](repeating: 0, count: AudioSpectrumMeter.bandCount)
         state = .recording; hotkey.cancellationEnabled = !practice && accessibilityGranted; level = 0; elapsed = 0; captureReady = false; captureStartupMilliseconds = nil
         updateLipHotkey()
         let requestedAt = ProcessInfo.processInfo.systemUptime
@@ -785,6 +789,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                     Task { @MainActor in guard let self, self.sessionID == id, self.state == .recording else { return }; self.level = level
                         self.pendingSamples[offset] = samples
                         while let contiguous = self.pendingSamples.removeValue(forKey: self.acceptedSamples) {
+                            self.spectrumLevels = self.spectrumMeter.levels(for: contiguous)
                             self.acceptedSamples += contiguous.count
                             let prior = self.appendTask
                             let initialization = self.operation
