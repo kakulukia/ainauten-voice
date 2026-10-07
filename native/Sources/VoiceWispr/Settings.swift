@@ -98,7 +98,7 @@ struct SettingsView: View {
                 }.buttonStyle(.plain).pointerAwareFocus().help(L10n.text("navigation.settings.help"))
                 VStack(alignment: .leading, spacing: 4) {
                     Label(L10n.text("sidebar.localAudio"), systemImage: "lock.fill").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Text(L10n.text("sidebar.version", model.updates.version)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                    Text(L10n.text("sidebar.version", model.updates.version + (Bundle.main.object(forInfoDictionaryKey: "AInautenLocalBuild") as? Bool == true ? " dev" : ""))).font(.system(size: 11)).foregroundStyle(.tertiary)
                         .padding(.leading, SidebarLabelStyle.textInset)
                 }.padding(.leading, 10)
             }.labelStyle(SidebarLabelStyle()).padding(18).frame(width: 195).background(Color(nsColor: .windowBackgroundColor))
