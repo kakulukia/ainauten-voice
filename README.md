@@ -59,8 +59,6 @@ Die native App verwendet SwiftUI/AppKit, FluidAudio mit Parakeet v3 und eingebet
 
 Der öffentliche Download ist Beta **0.1.4, Build 8**, mit signierten automatischen Updates. Die Automatik ist standardmäßig aktiv und lässt sich unter **Einstellungen → Updates** ausschalten. Ältere Apps ohne Updater müssen einmalig durch den aktuellen Download ersetzt werden. Manuelle Fehlerberichte sind unter **Hilfe** verfügbar und gehen nach deiner Bestätigung an den privaten Eingang. Forschungsmodelle und automatische Fehlerübermittlung bleiben standardmäßig aus. Ein Git-Push allein verteilt kein App-Update. [Installations- und Updatehinweise](docs/agent-installation.md#updates-und-entwicklungsbuilds).
 
-Der Quellcode ist öffentlich einsehbar. Für den eigenen App-Code wurde bislang keine Open-Source-Lizenz erteilt; alle Rechte bleiben vorbehalten. Abhängigkeiten und Modelle haben eigene Lizenzen. [Lizenznachweise](native/Resources/Licenses/NOTICE.md) · [Forschungsmodell-Lizenzen](native/lipreading_runtime/licenses/NOTICE-Research-Models.txt).
-
 </details>
 
 Entwickelt von [AInauten](https://www.ainauten.com/). AInauten Voice ist ein eigenständiges Projekt ohne Verbindung zu Wispr. Wispr Flow ist eine Marke ihres Inhabers.
