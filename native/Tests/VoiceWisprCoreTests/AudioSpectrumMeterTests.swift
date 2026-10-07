@@ -18,7 +18,7 @@ final class AudioSpectrumMeterTests: XCTestCase {
 
     func testQuietTonesHaveVisiblePeaksWithoutSaturating() {
         let levels = AudioSpectrumMeter().levels(for: tone(187.5, amplitude: 0.005))
-        XCTAssertGreaterThan(levels[4], 0.35)
+        XCTAssertGreaterThan(levels[4], 0.3)
         XCTAssertLessThan(levels[4], 0.8)
     }
 
@@ -30,11 +30,11 @@ final class AudioSpectrumMeterTests: XCTestCase {
         XCTAssertLessThan(levels[4], 0.1)
     }
 
-    func testAcceptedBassReductionPreservesCalibratedQuietPeak() {
-        // Reference captured from the accepted demo with 40...500 Hz and 5 dB bass reduction.
+    func testBassReductionPreservesCalibratedQuietPeak() {
+        // Reference for the selected 40...500 Hz display with 8 dB bass reduction.
         let levels = AudioSpectrumMeter().levels(for: tone(62.5, amplitude: 0.005))
-        XCTAssertEqual(Double(levels[0]), 0.2494278, accuracy: 0.00001)
-        XCTAssertEqual(Double(levels[1]), 0.1147409, accuracy: 0.00001)
+        XCTAssertEqual(Double(levels[0]), 0.16609447, accuracy: 0.00001)
+        XCTAssertEqual(Double(levels[1]), 0.05093882, accuracy: 0.00001)
     }
 
     func testSmallCallbacksMatchACompleteAudioWindow() {

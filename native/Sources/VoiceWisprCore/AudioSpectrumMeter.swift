@@ -48,8 +48,8 @@ public final class AudioSpectrumMeter {
             }
             let magnitude = 2 * sqrt(power) / windowSum
             // Decibel scaling makes normal speech visible without amplifying ASR input.
-            // Taper the selected 5 dB bass reduction to zero at the highest band.
-            let decibels = 20 * log10(max(1e-9, magnitude)) - Float(5 * pow(1 - Double(band) / 8, 2))
+            // Taper the selected 8 dB bass reduction to zero at the highest band.
+            let decibels = 20 * log10(max(1e-9, magnitude)) - Float(8 * pow(1 - Double(band) / 8, 2))
             return min(1, max(0, (decibels + 60) / 36))
         }
     }
