@@ -6,7 +6,10 @@ import Accelerate
 public final class AudioSpectrumMeter {
     public static let bandCount = 9
     private static let sampleCount = 512
-    private static let edges: [Double] = [60, 140, 260, 440, 700, 1100, 1800, 2800, 4500, 8000]
+    // Accepted demo spacing, scaled to the selected 40...500 Hz display range.
+    private static let edges: [Double] = [60.0, 140, 230, 340, 480, 650, 900, 1250, 1750, 2500].map {
+        40 * pow(500.0 / 40, log($0 / 60) / log(2500.0 / 60))
+    }
     private let setup: vDSP_DFT_Setup?
     private let window: [Float]
     private let windowSum: Float
@@ -45,7 +48,8 @@ public final class AudioSpectrumMeter {
             }
             let magnitude = 2 * sqrt(power) / windowSum
             // Decibel scaling makes normal speech visible without amplifying ASR input.
-            let decibels = 20 * log10(max(1e-9, magnitude))
+            // Taper the selected 5 dB bass reduction to zero at the highest band.
+            let decibels = 20 * log10(max(1e-9, magnitude)) - Float(5 * pow(1 - Double(band) / 8, 2))
             return min(1, max(0, (decibels + 60) / 36))
         }
     }
