@@ -123,7 +123,7 @@ html = index.read_text()
 if "{{DOWNLOAD_SHA256}}" in html:
     index.write_text(html.replace("{{DOWNLOAD_SHA256}}", digest))
 (downloads / 'SHA256SUMS.txt').write_text(f'{digest}  {dmg.name}\n')
-(downloads / 'release.json').write_text(json.dumps({'name': 'AInauten Voice', 'version': version, 'build': int(info['CFBundleVersion']), 'updaterIncluded': bool(info.get('SUPublicEDKey') and (app/'Contents/Frameworks/Sparkle.framework').exists()), 'automaticUpdatesByDefault': bool(info.get('SUEnableAutomaticChecks') and info.get('SUAutomaticallyUpdate')), 'reportDeliveryEnabled': info.get('AInautenReportDeliveryEnabled') is True, 'architecture': 'arm64', 'sha256': digest, 'filename': dmg.name, 'size': len(dmg_data), 'notarized': verified_release['notarized'], 'signing': verified_release['signing'], 'clipboardCompatibilityByDefault': False}, indent=2) + '\n')
+(downloads / 'release.json').write_text(json.dumps({'name': 'AInauten Voice', 'version': version, 'build': int(info['CFBundleVersion']), 'updaterIncluded': bool(info.get('SUPublicEDKey') and (app/'Contents/Frameworks/Sparkle.framework').exists()), 'automaticUpdatesByDefault': bool(info.get('SUEnableAutomaticChecks') and info.get('SUAutomaticallyUpdate')), 'reportDeliveryEnabled': info.get('AInautenReportDeliveryEnabled') is True, 'architecture': 'arm64', 'sha256': digest, 'filename': dmg.name, 'size': len(dmg_data), 'notarized': verified_release['notarized'], 'signing': verified_release['signing'], 'clipboardCompatibilityByDefault': info.get('AInautenClipboardCompatibilityDefault') is True}, indent=2) + '\n')
 print(f'RELEASE {version} {len(dmg_data)} bytes SHA256 {digest}')
 print(f'PROMO {video.stat().st_size} bytes SHA256 {video_digest}')
 if args.updates:
@@ -135,4 +135,6 @@ if args.updates:
 if redirects:
     (dist/'_redirects').write_text('\n'.join(redirects)+'\n')
 
+subprocess.run(['python3', str(root/'scripts/build-content.py'), '--output', str(dist)], cwd=root, check=True)
+subprocess.run(['python3', str(root/'scripts/check-content.py'), '--root', str(dist)], cwd=root, check=True)
 subprocess.run(['python3', str(root/'check.py'), '--root', str(dist)], cwd=root, check=True)

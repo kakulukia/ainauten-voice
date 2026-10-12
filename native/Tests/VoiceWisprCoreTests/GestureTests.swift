@@ -31,7 +31,7 @@ final class GestureTests: XCTestCase {
         var actions: [DictationGesture] = []; hotkey.onGesture = { actions.append($0) }
         let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: true)); down.flags = .maskCommand
         _ = hotkey.handle(.keyDown, event: down)
-        hotkey.recoverAfterTapTimeout(flags: .maskCommand, keyIsDown: { _ in true })
+        hotkey.recoverAfterTapTimeout(flags: .maskCommand, keyIsDown: { _ in false })
         XCTAssertEqual(actions, [.start])
         hotkey.recoverAfterTapTimeout(flags: [], keyIsDown: { _ in false })
         XCTAssertEqual(actions, [.start, .stop])

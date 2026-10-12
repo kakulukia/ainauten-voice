@@ -104,7 +104,7 @@ public actor ProcessingPipeline {
         self.preserveCompletedSentences = preserveCompletedSentences
     }
 
-    public func start(sessionID: UUID = UUID(), style: TextStyle, dictionary entries: [DictionaryEntry] = []) async throws {
+    public func start(sessionID: UUID = UUID(), style: TextStyle, dictionary entries: [DictionaryEntry] = [], languages: [String] = []) async throws {
         cancel()
         measurement = ProcessingMeasurement()
         formatter = MeasuredFormatter(base: baseFormatter, measurement: measurement)
@@ -118,6 +118,7 @@ public actor ProcessingPipeline {
         originalRequested = false
         matcher = StreamingDictionaryMatcher(entries); dictionary = DictionaryMatcher(entries)
         let preparation = measurement.begin(.preparation); defer { measurement.end(preparation) }
+        if let configurable = speech as? any SpeechLanguageConfiguring { await configurable.configureLanguages(languages, sessionID: sessionID); try ensure(token) }
         try await speech.prepare(); try ensure(token)
         formatterReady = style == .original
         if style != .original {

@@ -46,7 +46,17 @@ public actor SettingsStore {
         return data
     }
     private func stored() throws -> StoredSettings {
-        guard FileManager.default.fileExists(atPath: url.path) else { return StoredSettings(ExportDocument(), provenance: nil) }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            var document = ExportDocument()
+            let directory = url.deletingLastPathComponent()
+            // A quarantined profile is a failed upgrade/read, not a fresh
+            // installation. Preserve disabled clipboard access across restarts.
+            if FileManager.default.fileExists(atPath: directory.path),
+               try FileManager.default.contentsOfDirectory(atPath: directory.path).contains(where: { $0.hasPrefix("settings-quarantine-") && $0.hasSuffix(".json") }) {
+                document.settings.clipboardCompatibility = false
+            }
+            return StoredSettings(document, provenance: nil)
+        }
         let stored = try JSONDecoder().decode(StoredSettings.self, from: Self.boundedData(from: url))
         try Self.validate(stored.document)
         return stored
@@ -92,6 +102,9 @@ public actor SettingsStore {
         // Neither does it touch setup progress, pause or history. Undo must not re-enable a history the user turned off.
         document.settings.onboardingComplete = current.onboardingComplete; document.settings.practiceCompleted = current.practiceCompleted
         document.settings.paused = current.paused; document.settings.historyEnabled = current.historyEnabled
+        // The Wispr import never changes clipboard access; undo must retain a
+        // later user choice, including a withdrawal or an old disabled profile.
+        document.settings.clipboardCompatibility = current.clipboardCompatibility
         try write(document, provenance: snapshot.wisprImport)
         // One undo per import; repeating it would roll back later edits again.
         try? FileManager.default.removeItem(at: backup)

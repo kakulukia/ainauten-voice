@@ -262,6 +262,13 @@ framework = (
     root / "Vendor/build-apple/llama.xcframework/macos-arm64_x86_64/llama.framework"
 )
 shutil.copytree(framework, contents / "Frameworks/llama.framework", symlinks=True)
+run("python3", str(root / "scripts/bootstrap-speech-fallback.py"))
+fallback = root / "Vendor/upstream/speech-fallback"
+fallback_resources = contents / "Resources/SpeechFallback"
+fallback_resources.mkdir()
+shutil.copy2(fallback / "build/AInautenSpeechFallback", fallback_resources / "AInautenSpeechFallback")
+shutil.copy2(fallback / "ggml-small-q5_1.bin", fallback_resources / "ggml-small-q5_1.bin")
+run("codesign", "--force", "--options", "runtime", *timestamp_options, "--sign", identity, str(fallback_resources / "AInautenSpeechFallback"))
 sparkle_distribution = root / ".build/artifacts/sparkle/Sparkle"
 sparkle = contents / "Frameworks/Sparkle.framework"
 shutil.copytree(
@@ -270,6 +277,7 @@ shutil.copytree(
     symlinks=True,
 )
 shutil.copytree(root / "Resources/Licenses", contents / "Resources/Licenses")
+shutil.copy2(root / "Vendor/upstream/whisper-306c88f4/LICENSE", contents / "Resources/Licenses/Whisper-MIT.txt")
 shutil.copy2(
     sparkle_distribution / "LICENSE", contents / "Resources/Licenses/Sparkle-MIT.txt"
 )

@@ -56,7 +56,7 @@ extension AppModel {
     func requestCamera() {
         if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
             AVCaptureDevice.requestAccess(for: .video) { [weak self] _ in Task { @MainActor in self?.refreshPermissions() } }
-        } else { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!) }
+        } else { NSWorkspace.shared.open(PrivacySettings.destination("Camera")) }
     }
     func prepareLipReading(install: Bool = false) {
         guard LipReadingRuntime.releaseAvailable else { lipStatus = LipReadingRuntime.securityNotice; return }
@@ -189,13 +189,15 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         scheduleSave(); updateHotkey()
         if document.settings.menuBarOnly != oldValue.settings.menuBarOnly { updateActivationPolicy() }
     } }
-    @Published var state: PillState = .loading { didSet { updatePillVisibility(); if state != oldValue { announceState() } } }
-    @Published private var statusMessage: LocalizedMessage = .key("status.setup", [])
+    @Published var state: PillState = .loading { didSet { updatePillVisibility(); updateStatusItem(); if state != oldValue { announceState() } } }
+    @Published private var statusMessage: LocalizedMessage = .key("status.starting", [])
+    private var preparationStatusMessage: LocalizedMessage = .key("status.starting", [])
     var status: String {
         get { statusMessage.text }
         set {
             statusMessage = L10n.message(newValue)
             statusRevision &+= 1
+            updateStatusItem()
         }
     }
     /// A new feedback generation invalidates old timers, independent of translation.
@@ -439,6 +441,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         }
         #endif
         makeMenu()
+        updatePillVisibility()
         interfaceLanguageObserver = NotificationCenter.default.addObserver(forName: InterfaceLanguageStore.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.interfaceLanguageChanged() }
         }
@@ -467,7 +470,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
             }
             #endif
             loading = false; state = PillState(rawValue: preview) ?? .ready
-            status = state == .processing ? "Text wird aufbereitet …" : state == .error ? "Einfügen prüfen" : state == .success ? "Eingefügt" : state == .paused ? "Pausiert" : "Bereit"
+            status = state == .loading ? preparationStatusMessage.text : state == .processing ? "Text wird aufbereitet …" : state == .error ? "Einfügen prüfen" : state == .success ? "Eingefügt" : state == .paused ? "Pausiert" : "Bereit"
             level = 0.65; elapsed = 24
             if state == .error { results = [.init(id: UUID(), text: "Vielen Dank für die Rückmeldung.\n\nDer Entwurf wird morgen geprüft.", original: "", usedFallback: false, duration: 24)]; recoveryReason = "Das Textfeld hat sich geändert. Prüfe das Ziel und kopiere deinen Text."; showRecovery() }
             if preview == "settings" { showSettings() }
@@ -563,9 +566,16 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                 if document.settings.cloudEnabled {
                     if let endpoint = URL(string: document.settings.cloudEndpoint), (try? CloudRecipient.isApproved(endpoint)) == true {} else { document.settings.cloudEnabled = false }
                 }
-            } catch { errorMessage = "Einstellungen konnten nicht geladen werden: \(error.localizedDescription)"; reports.record(component: .settings, code: .settingsLoadFailed) }
+            } catch {
+                // Loading an existing profile failed: never apply the new
+                // installation default to an unknown previous privacy choice.
+                document.settings.clipboardCompatibility = false
+                errorMessage = "Einstellungen konnten nicht geladen werden: \(error.localizedDescription)"
+                reports.record(component: .settings, code: .settingsLoadFailed)
+            }
             updateActivationPolicy()
-            loading = false
+            loading = false; preparing = true
+            preparationStatusMessage = .key("status.modelsChecking", [])
             wisprInstalled = WisprSwitch.installedURL != nil
             refreshImportPreview()
             canUndoImport = FileManager.default.fileExists(atPath: ModelPaths.support.appendingPathComponent("wispr-import-undo.json").path)
@@ -573,7 +583,9 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
             settingsNavigation = SettingsNavigation(section: document.settings.onboardingComplete ? .overview : .setup, setupStep: nil)
             refreshHistory()
             if !document.settings.onboardingComplete { showSettings() }
-            if (try? await downloader.installed()) == true { await prepareModels() }
+            let installed = (try? await downloader.installed()) == true
+            preparing = false
+            if installed { await prepareModels() }
             if lipEnabled { prepareLipReading() }
             updateHotkey()
         }
@@ -643,9 +655,9 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         windowItem.submenu = windowMenu; mainMenu.addItem(windowItem); NSApplication.shared.windowsMenu = windowMenu
         NSApplication.shared.mainMenu = mainMenu
         if statusItem == nil { statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength) }
-        statusItem?.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "AInauten Voice")
+        statusSymbol = ""
         let menu = NSMenu()
-        for (title, selector) in [(L10n.text("menu.open"), #selector(openOverview)), (L10n.text("menu.history"), #selector(openHistory)), (L10n.text("menu.results"), #selector(openResults)), (L10n.text("menu.shortcutsEnabled"), #selector(togglePause)), (L10n.text("menu.returnToWispr"), #selector(returnToWispr)), (L10n.text("menu.quitShort"), #selector(quit))] {
+        for (title, selector) in [(L10n.text("menu.open"), #selector(openOverview)), (L10n.text("menu.history"), #selector(openHistory)), (L10n.text("navigation.dictionary"), #selector(openDictionary)), (L10n.text("menu.results"), #selector(openResults)), (L10n.text("menu.shortcutsEnabled"), #selector(togglePause)), (L10n.text("menu.returnToWispr"), #selector(returnToWispr)), (L10n.text("menu.quitShort"), #selector(quit))] {
             let item = NSMenuItem(title: title, action: selector, keyEquivalent: ""); item.target = self; menu.addItem(item)
             if selector == #selector(togglePause) { pauseMenuItem = item }
             if selector == #selector(returnToWispr) { wisprMenuItem = item }
@@ -658,10 +670,12 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         let paused = document.settings.paused
         pauseMenuItem?.state = paused ? .off : .on
         wisprMenuItem?.isHidden = !wisprInstalled
-        let symbol = paused ? "mic.slash" : "waveform"
+        let symbol = state == .loading ? "hourglass" : paused ? "mic.slash" : "waveform"
+        statusItem?.button?.toolTip = status
+        statusItem?.button?.setAccessibilityLabel(status)
         if statusSymbol != symbol {
             statusSymbol = symbol
-            statusItem?.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: paused ? L10n.text("menu.voicePaused") : L10n.text("menu.voice"))
+            statusItem?.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: status)
         }
     }
     @objc private func selectInterfaceLanguage(_ sender: NSMenuItem) {
@@ -677,6 +691,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     }
     @objc private func openOverview() { navigate(to: document.settings.onboardingComplete ? .overview : .setup) }
     @objc private func openHistory() { navigate(to: .history) }
+    @objc private func openDictionary() { navigate(to: .dictionary); refreshHistory() }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         #if DEBUG
         if previewMode, CommandLine.arguments.contains("--test-delivery") { return true }
@@ -733,14 +748,14 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         hotkey.shortcut = document.settings.shortcut
         hotkey.bindings = document.settings.shortcutBindings ?? ShortcutBindings()
         updateLipHotkey()
-        let allowed = modelsReady && microphoneGranted && accessibilityGranted && !lipSession && !conflict && !document.settings.paused && !shortcutCapture
+        let allowed = !preparing && modelsReady && microphoneGranted && accessibilityGranted && !lipSession && !conflict && !document.settings.paused && !shortcutCapture
         // A result panel, including manual history/partial text, never blocks
         // a new dictation. start() closes it while retaining the hold gesture.
         hotkey.enabled = allowed && acceptsDictationGesture
         if allowed { _ = hotkey.install() }
         guard state != .recording && state != .processing && state != .success && state != .error else { return }
         let nextState: PillState = allowed ? .ready : preparing || loading ? .loading : conflict ? .conflict : document.settings.paused ? .paused : .needsSetup
-        let nextStatus = allowed ? "Bereit zum Diktieren" : preparing || loading ? "Modelle werden geladen" : conflict ? "Wispr Flow läuft. Bitte den Wechsel abschließen." : document.settings.paused ? "Tastenkürzel ausgeschaltet" : !modelsReady ? "Modelle einrichten" : !microphoneGranted ? "Mikrofon freigeben" : "Bedienungshilfen freigeben"
+        let nextStatus = allowed ? "Bereit zum Diktieren" : preparing || loading ? preparationStatusMessage.text : conflict ? "Wispr Flow läuft. Bitte den Wechsel abschließen." : document.settings.paused ? "Tastenkürzel ausgeschaltet" : !modelsReady ? "Modelle einrichten" : !microphoneGranted ? "Mikrofon freigeben" : "Bedienungshilfen freigeben"
         if state != nextState { state = nextState }
         if statusMessage != L10n.message(nextStatus) { status = nextStatus }
         hotkey.enabled = allowed
@@ -748,12 +763,12 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     func requestMicrophone() {
         if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] _ in Task { @MainActor in self?.refreshPermissions() } }
-        } else { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }
+        } else { NSWorkspace.shared.open(PrivacySettings.destination("Microphone")) }
     }
     func requestAccessibility() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        NSWorkspace.shared.open(PrivacySettings.destination("Accessibility"))
     }
     func installModels() {
         guard !downloading else { return }; downloading = true; errorMessage = nil
@@ -770,15 +785,17 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     func pauseDownload() { downloadTask?.cancel(); Task { await downloader.cancel() } }
     func prepareModels() async {
         guard !quitting else { return }
-        preparing = true; state = .loading; status = "Modelle werden geladen …"
+        preparationStatusMessage = .key("status.speechLoading", [])
+        preparing = true; state = .loading; status = preparationStatusMessage.text; updateHotkey()
         do {
             try await speech.prepare()
             guard !quitting else { return }
+            preparationStatusMessage = .key("status.formatterLoading", []); status = preparationStatusMessage.text
             try await formatter.prepare()
             guard !quitting else { return }
             modelsReady = true; state = .paused; status = "Bereit"
         }
-        catch { modelsReady = false; errorMessage = error.localizedDescription; status = "Modelle prüfen"; reports.record(component: .models, code: .modelLoadFailed) }
+        catch { modelsReady = false; errorMessage = error.localizedDescription; state = .error; status = "Modelle prüfen"; reports.record(component: .models, code: .modelLoadFailed) }
         preparing = false; updateHotkey()
     }
     func refreshImportPreview() {
@@ -891,11 +908,13 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         }
         #endif
         let dictionary = document.dictionary
+        let languages = document.settings.languages
         operation = Task {
             do {
                 guard sessionID == id, !Task.isCancelled else { return }
                 // Keep synchronous AX queries outside the event-tap callback.
-                if let targetPID { focus = FocusSnapshot.capture(expectedPID: targetPID) }
+                if let targetPID { focus = await FocusSnapshot.captureWithRetry(expectedPID: targetPID) }
+                guard sessionID == id, !Task.isCancelled else { return }
                 pill?.position()
                 let style = document.settings.style(for: focus?.bundleID)
                 historyContext = HistoryCaptureContext(date: Date(), style: style, bundleID: focus?.bundleID,
@@ -910,12 +929,12 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                     preserveCompletedSentences: !document.settings.cloudEnabled); self.pipeline = pipeline
                 // An immediate release still needs pipeline initialization so Stop can finish.
                 if state != .recording {
-                    try await pipeline.start(sessionID: id, style: style, dictionary: dictionary)
+                    try await pipeline.start(sessionID: id, style: style, dictionary: dictionary, languages: languages)
                     return
                 }
                 #if DEBUG
                 if practice && practiceFixture != nil {
-                    try await pipeline.start(sessionID: id, style: style, dictionary: dictionary)
+                    try await pipeline.start(sessionID: id, style: style, dictionary: dictionary, languages: languages)
                     guard sessionID == id, state == .recording else { return }
                     captureReady = true; level = 0.65; return
                 }
@@ -949,7 +968,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                     if self.practiceSession && self.practiceStopper.shouldStop(level: self.level, elapsed: self.elapsed) { self.stop(); return }
                     if self.elapsed >= 1200 { self.stop() } else if self.elapsed >= 1140 { self.status = "Noch eine Minute bis zum Aufnahmelimit" }
                 } }
-                try await pipeline.start(sessionID: id, style: style, dictionary: dictionary)
+                try await pipeline.start(sessionID: id, style: style, dictionary: dictionary, languages: languages)
                 guard sessionID == id else { await pipeline.cancel(); return }
             } catch { if sessionID == id { fail(error.localizedDescription) } }
         }
@@ -1167,13 +1186,13 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     }
     func closeSettings() { settingsWindow?.performClose(nil) }
     private func updatePillVisibility() {
-        let active = state == .recording || state == .processing || state == .success || (state == .error && recoveryWindow?.isVisible != true)
+        let active = state == .loading || state == .recording || state == .processing || state == .success || (state == .error && recoveryWindow?.isVisible != true)
         #if DEBUG
         if previewMode, CommandLine.arguments.contains("--test-delivery") { pill?.setVisible(!quitting); return }
         #endif
         // The shortcut is the entry point. No persistent idle microphone,
         // including when Settings remains open in the background.
-        pill?.setVisible(!quitting && active)
+        pill?.setVisible(!quitting && active, loading: state == .loading)
     }
     func pasteLastResult() {
         guard sessionID == nil, !conflict, let result = results.first else { return }

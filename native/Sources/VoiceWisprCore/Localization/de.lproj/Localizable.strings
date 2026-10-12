@@ -30,11 +30,11 @@
 "common.cancel" = "Abbrechen";
 "common.copy" = "Kopieren";
 "common.next" = "Weiter";
-"dictation.help" = "Cursor ins Textfeld setzen, Kürzel halten, sprechen und loslassen. Doppeltipp startet freihändig; erneutes Drücken stoppt. Die Pill erscheint nur während des Diktats.";
+"dictation.help" = "Cursor ins Textfeld setzen, Kürzel halten, sprechen und loslassen. Doppeltipp startet freihändig; erneutes Drücken stoppt. Das Overlay erscheint beim App-Start und während des Diktats.";
 "dictation.language.addAX" = "%@, hinzufügen";
 "dictation.language.removeAX" = "%@, ausgewählt. Entfernen";
-"dictation.languageBrief" = "Automatische Erkennung, auch bei Sprachwechseln.";
-"dictation.languageHelp" = "Die Erkennung findet die Sprache automatisch, auch beim Wechsel mitten im Satz.";
+"dictation.languageBrief" = "Erkennung in deinen ausgewählten Sprachen.";
+"dictation.languageHelp" = "Nur Deutsch gewählt: Auffällige fremdsprachige Ergebnisse werden lokal mit festem Deutsch erneut erkannt. Mehrere Sprachen erlauben Sprachwechsel. Namen und Fachbegriffe bleiben erhalten.";
 "dictation.languageQuestion" = "Welche Sprachen sprichst du?";
 "dictation.languages" = "Sprachen";
 "dictation.languages.add" = "Weitere Sprachen hinzufügen";
@@ -144,7 +144,7 @@
 "practice.waitForModels" = "Die Probe ist möglich, sobald die Modelle geladen sind.";
 "privacy.audio" = "Audio wird nur im Speicher verarbeitet und nach dem Diktat freigegeben. Diagnosemeldungen enthalten keine Diktate.";
 "privacy.clipboard" = "Zwischenablage für kompatibles Einfügen verwenden";
-"privacy.clipboardDetail" = "Standardmäßig aus. Nur wenn du diese Option einschaltest, liegt dein Text beim Einfügen kurz in der systemweiten Zwischenablage. Andere lokale Apps können ihn dort lesen. Ohne diese Freigabe wird direkt über Bedienungshilfen eingefügt; bei nicht unterstützten Feldern bleibt der Text in der App. Mit „Kopieren“ kannst du ihn selbst übertragen.";
+"privacy.clipboardDetail" = "Bei neuen Installationen eingeschaltet. Beim kompatiblen Einfügen liegt dein Text kurz in der systemweiten Zwischenablage und kann von anderen lokalen Apps gelesen werden. Du kannst diese Option ausschalten; dann wird nur in direkt unterstützte Textfelder eingefügt. Gespeicherte Einstellungen bleiben erhalten.";
 "privacy.clipboardHelp" = "Der vorherige Inhalt wird gesichert und wiederhergestellt. Eine neue Kopieraktion von dir hat Vorrang. Unklare Ergebnisse werden nicht automatisch erneut eingefügt.";
 "privacy.cloud" = "Cloud-Optimierung ist optional und sendet nur Text an deine gewählte Schnittstelle. Zugangsdaten liegen im macOS-Schlüsselbund.";
 "privacy.exportHistory" = "Verlauf exportieren …";
@@ -222,3 +222,9 @@
 "settings.interfaceLanguage.help" = "Ändert nur die Oberfläche. Deine Diktatsprachen bleiben erhalten.";
 "settings.interfaceLanguage.saveFailed" = "Die Oberflächensprache konnte nicht gespeichert werden. Die bisherige Auswahl bleibt erhalten.";
 "common.skip" = "Überspringen";
+
+"permissions.accessibility.macOS27" = "Gerätesteuerung und Datenzugriff";
+"permissions.accessibility.allow.macOS27" = "Gerätesteuerung freigeben";
+"permissions.steps.macOS27" = "1. Öffne „Datenschutz & Sicherheit → Gerätesteuerung und Datenzugriff“.\n2. Aktiviere „AInauten Voice“. Fehlt der Eintrag, füge die App über + aus „Programme“ hinzu.\n3. Nach einem Signaturwechsel entferne den alten Eintrag mit − und füge die App erneut hinzu.";
+
+"speech.languageMismatch" = "Die erkannte Sprache passt nicht zur Auswahl. Der Text wurde nicht eingefügt. Prüfe die Diktatsprachen und sprich den Abschnitt erneut.";

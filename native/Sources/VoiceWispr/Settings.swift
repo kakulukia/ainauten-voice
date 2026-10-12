@@ -205,7 +205,7 @@ struct SettingsView: View {
                 Spacer()
                 if step == .practice && model.practiceFeedback.succeeded {
                     let next = model.pendingSetupStep
-                    Button(next == .switchover ? L10n.text("setup.nextSwitch") : next == .permissions ? L10n.text("permissions.accessibility.allow") : L10n.text("setup.toDictation")) {
+                    Button(next == .switchover ? L10n.text("setup.nextSwitch") : next == .permissions ? L10n.text(PrivacySettings.accessibilityKey("permissions.accessibility.allow")) : L10n.text("setup.toDictation")) {
                         if let next { step = next } else { model.completeSetup() }
                     }.buttonStyle(.borderedProminent)
                 }
@@ -307,9 +307,9 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 18) {
             Text(L10n.text("permissions.title")).font(.system(size: 19, weight: .semibold))
             HStack { VStack(alignment: .leading, spacing: 4) { Label(L10n.text("permissions.microphone"), systemImage: model.microphoneGranted ? "checkmark.circle" : "mic"); Text(L10n.text("permissions.microphone.help")).font(.system(size: 12)).foregroundStyle(.secondary) }; Spacer(); Button(model.microphoneGranted ? L10n.text("permissions.allowed") : L10n.text("permissions.allow")) { model.requestMicrophone() }.disabled(model.microphoneGranted) }
-            HStack { VStack(alignment: .leading, spacing: 4) { Label(L10n.text("permissions.accessibility"), systemImage: model.accessibilityGranted ? "checkmark.circle" : "keyboard"); Text(L10n.text("permissions.accessibility.help")).font(.system(size: 12)).foregroundStyle(.secondary) }; Spacer(); Button(model.accessibilityGranted ? L10n.text("permissions.allowed") : L10n.text("permissions.openSettings")) { model.requestAccessibility() }.disabled(model.accessibilityGranted) }
+            HStack { VStack(alignment: .leading, spacing: 4) { Label(L10n.text(PrivacySettings.accessibilityKey("permissions.accessibility")), systemImage: model.accessibilityGranted ? "checkmark.circle" : "keyboard"); Text(L10n.text("permissions.accessibility.help")).font(.system(size: 12)).foregroundStyle(.secondary) }; Spacer(); Button(model.accessibilityGranted ? L10n.text("permissions.allowed") : L10n.text("permissions.openSettings")) { model.requestAccessibility() }.disabled(model.accessibilityGranted) }
             if !model.accessibilityGranted {
-                Text(L10n.text("permissions.steps")).fixedSize(horizontal: false, vertical: true)
+                Text(L10n.text(PrivacySettings.accessibilityKey("permissions.steps"))).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)).resizable().frame(width: 38, height: 38).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) { Text("AInauten Voice.app").font(.system(size: 13, weight: .semibold)); Text(L10n.text("permissions.dragHint")).font(.system(size: 12)).foregroundStyle(.secondary) }
@@ -385,12 +385,12 @@ struct SettingsView: View {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 20) {
                     readinessLabel(L10n.text("permissions.microphone"), ready: model.microphoneGranted)
-                    readinessLabel(L10n.text("permissions.accessibility"), ready: model.accessibilityGranted)
+                    readinessLabel(L10n.text(PrivacySettings.accessibilityKey("permissions.accessibility")), ready: model.accessibilityGranted)
                     readinessLabel(model.modelsReady ? L10n.text("models.ready") : model.preparing ? L10n.text("models.loadingBrief") : L10n.text("models.missing"), ready: model.modelsReady)
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     readinessLabel(L10n.text("permissions.microphone"), ready: model.microphoneGranted)
-                    readinessLabel(L10n.text("permissions.accessibility"), ready: model.accessibilityGranted)
+                    readinessLabel(L10n.text(PrivacySettings.accessibilityKey("permissions.accessibility")), ready: model.accessibilityGranted)
                     readinessLabel(model.modelsReady ? L10n.text("models.ready") : model.preparing ? L10n.text("models.loadingBrief") : L10n.text("models.missing"), ready: model.modelsReady)
                 }
             }
@@ -630,7 +630,7 @@ struct SettingsView: View {
                         Button(L10n.text("beta.reload")) { model.prepareLipReading() }.disabled(model.lipPreparing)
                     }
                     if !model.cameraGranted { Button(L10n.text("permissions.camera.allow")) { model.requestCamera() }.disabled(model.isUIPreview) }
-                    if !model.accessibilityGranted { Button(L10n.text("permissions.accessibility.allow")) { model.requestAccessibility() }.disabled(model.isUIPreview) }
+                    if !model.accessibilityGranted { Button(L10n.text(PrivacySettings.accessibilityKey("permissions.accessibility.allow"))) { model.requestAccessibility() }.disabled(model.isUIPreview) }
                 }
                 Text(L10n.text("beta.research"))
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

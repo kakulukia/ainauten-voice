@@ -4,16 +4,48 @@ import Darwin
 @testable import VoiceWisprCore
 
 final class SecuritySettingsTests: XCTestCase {
-    func testClipboardRequiresExplicitOptInForNewAndLegacySettings() throws {
-        XCTAssertFalse(Settings().usesClipboardForInsertion)
-        let legacy = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(Settings()))
-        XCTAssertNil(legacy.clipboardCompatibility)
-        XCTAssertFalse(legacy.usesClipboardForInsertion)
-        var optedIn = Settings(); optedIn.clipboardCompatibility = true
-        let restored = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(optedIn))
-        XCTAssertTrue(restored.usesClipboardForInsertion)
-        optedIn.clipboardCompatibility = false
-        XCTAssertFalse(optedIn.usesClipboardForInsertion)
+    func testPrivacySettingsKeepVersionSpecificPermissionNamesAndTCCDestinations() {
+        XCTAssertEqual(PrivacySettings.accessibilityKey("permissions.accessibility", modern: false), "permissions.accessibility")
+        XCTAssertEqual(PrivacySettings.accessibilityKey("permissions.steps", modern: true), "permissions.steps.macOS27")
+        for permission in ["Accessibility", "Microphone", "Camera"] {
+            let destination = PrivacySettings.destination(permission)
+            XCTAssertEqual(destination.scheme, "x-apple.systempreferences")
+            XCTAssertEqual(destination.absoluteString, "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_" + permission)
+        }
+    }
+    func testClipboardDefaultEnablesNewProfilesAndPreservesSavedChoices() throws {
+        XCTAssertTrue(Settings().usesClipboardForInsertion)
+        for choice in [true, false] {
+            var settings = Settings(); settings.clipboardCompatibility = choice
+            let restored = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(settings))
+            XCTAssertEqual(restored.clipboardCompatibility, choice)
+            XCTAssertEqual(restored.usesClipboardForInsertion, choice)
+        }
+    }
+    func testClipboardLegacyMissingAndNullStayDisabledAcrossSave() throws {
+        let encoded = try JSONEncoder().encode(Settings())
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        for value in [nil, NSNull()] as [Any?] {
+            object["clipboardCompatibility"] = value
+            let legacy = try JSONDecoder().decode(Settings.self, from: JSONSerialization.data(withJSONObject: object))
+            XCTAssertNil(legacy.clipboardCompatibility)
+            XCTAssertFalse(legacy.usesClipboardForInsertion)
+            let restored = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(legacy))
+            XCTAssertFalse(restored.usesClipboardForInsertion)
+        }
+    }
+    func testClipboardFreshStorePersistsDefaultAndExplicitDisable() async throws {
+        let root = try directory()
+        let store = SettingsStore(url: root.appendingPathComponent("settings.json"))
+        var document = try await store.load()
+        XCTAssertTrue(document.settings.usesClipboardForInsertion)
+        try await store.save(document)
+        var restored = try await store.load()
+        XCTAssertTrue(restored.settings.usesClipboardForInsertion)
+        document.settings.clipboardCompatibility = false
+        try await store.save(document)
+        restored = try await store.load()
+        XCTAssertFalse(restored.settings.usesClipboardForInsertion)
     }
     private func directory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("voice-security-" + UUID().uuidString)
@@ -35,6 +67,21 @@ final class SecuritySettingsTests: XCTestCase {
             XCTAssertEqual(restored.settings.shortcut, legacy.shortcut)
             XCTAssertEqual(restored.settings.languages, legacy.languages)
         }
+    }
+    func testQuarantinedProfileDoesNotEnableClipboardOnRelaunch() async throws {
+        let root = try directory(), url = root.appendingPathComponent("settings.json")
+        try Data("{\"settings\":{\"clipboardCompatibility\":false}".utf8).write(to: url)
+        let store = SettingsStore(url: url)
+        do { _ = try await store.load(); XCTFail("Malformed settings accepted") } catch {}
+        let fallback = try await store.load()
+        XCTAssertFalse(fallback.settings.usesClipboardForInsertion)
+        let relaunched = SettingsStore(url: url)
+        let restored = try await relaunched.load()
+        XCTAssertFalse(restored.settings.usesClipboardForInsertion)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        let quarantine = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        XCTAssertEqual(quarantine.count, 1)
+        XCTAssertTrue(quarantine[0].hasPrefix("settings-quarantine-"))
     }
     func testBoundedLoaderRejectsSparseOversizedFilesLinksAndPipes() throws {
         let root = try directory(), large = root.appendingPathComponent("large.json")
