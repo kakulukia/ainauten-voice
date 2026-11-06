@@ -10,6 +10,8 @@ Mikrofon, Bedienungshilfen und die erste macOS-Startbestätigung erfordern eine 
 
 ## Wenn der Nutzer entwickeln möchte
 
+Für dieses Projekt vor Codeänderungen immer einen eigenen Branch mit Präfix `feature/` von `upstream/main` anlegen, auch für Fehlerbehebungen. Änderungen für einen Pull Request getrennt von anderen Features halten; nicht direkt auf `dev` oder `main` entwickeln.
+
 Andy hat für dieses Projekt dauerhaft freigegeben, die lokal verwendete AInauten Voice App jederzeit selbstständig durch einen neu gebauten Build zu ersetzen und neu zu starten. Dafür ist keine erneute Freigabe erforderlich. Vorhandene Einstellungen, Daten, Bundle-ID und die bestehende Signieridentität erhalten; den neuen Build prüfen.
 
 Die native App liegt in `native/`, die Downloadseite in `site/`, der Fehlerempfang in `reporting/`. Lies `native/README.md` und `native/docs/implementation-status.md`. Bewahre Bundle-ID `com.mediapublishing.VoiceWispr`, Modul `VoiceWispr`, Datenordner `~/Library/Application Support/Voice Wispr` und bestehende Schlüsselbunddienste.
