@@ -3,6 +3,50 @@ import Foundation
 @testable import VoiceWisprCore
 
 final class DownloadTests: XCTestCase {
+    func testOptionalSwissGroupDoesNotChangeDefaultInstallation() async throws {
+        Self.FixtureProtocol.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("swiss-groups-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let hash = root.appendingPathComponent("hash"); try Self.FixtureProtocol.payload.write(to: hash)
+        let sha = try ModelDownloader.digest(hash)
+        let base = ModelFile(path: "base.bin", url: URL(string: "fixture://base")!, sha256: sha, size: 10, group: "vad")
+        let formatter = ModelFile(path: "formatter.bin", url: URL(string: "fixture://formatter")!, sha256: sha, size: 10, group: "qwen")
+        let swiss = ModelFile(path: "swiss/model.bin", url: URL(string: "fixture://swiss")!, sha256: sha, size: 10, group: SwissGermanModel.group)
+        let cfg = URLSessionConfiguration.ephemeral; cfg.protocolClasses = [Self.FixtureProtocol.self]
+        let downloader = ModelDownloader(root: root, manifest: .init(version: 1, files: [base, formatter, swiss]), sessionConfiguration: cfg)
+        try await downloader.install(includeFormatter: false) { _, _, _ in }
+        let originalReady = try await downloader.installed(includeFormatter: false)
+        XCTAssertTrue(originalReady)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(swiss.path).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(formatter.path).path))
+        try await downloader.install(groups: [SwissGermanModel.group]) { _, _, group in XCTAssertEqual(group, SwissGermanModel.group) }
+        let swissReady = try await downloader.installed(groups: [SwissGermanModel.group])
+        XCTAssertTrue(swissReady)
+        let empty = try await downloader.installed(groups: [])
+        let unknown = try await downloader.installed(groups: [SwissGermanModel.group, "missing"])
+        XCTAssertFalse(empty); XCTAssertFalse(unknown)
+        do { try await downloader.install(groups: ["missing"]) { _, _, _ in }; XCTFail("Unknown group must not succeed") } catch { }
+        try await downloader.install { _, _, group in XCTAssertFalse(group == SwissGermanModel.group) }
+        let defaultReady = try await downloader.installed()
+        XCTAssertTrue(defaultReady)
+    }
+    func testConcurrentInstallCannotReplaceTheCancelableTransfer() async throws {
+        Self.FixtureProtocol.reset(); Self.FixtureProtocol.delay = true
+        defer { Self.FixtureProtocol.reset() }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("swiss-concurrent-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let hash = root.appendingPathComponent("hash"); try Self.FixtureProtocol.payload.write(to: hash)
+        let file = ModelFile(path: "model.bin", url: URL(string: "fixture://concurrent")!, sha256: try ModelDownloader.digest(hash), size: 10, group: "vad")
+        let cfg = URLSessionConfiguration.ephemeral; cfg.protocolClasses = [Self.FixtureProtocol.self]
+        let downloader = ModelDownloader(root: root, manifest: .init(version: 1, files: [file]), sessionConfiguration: cfg)
+        let first = Task { try await downloader.install { _, _, _ in } }
+        try await Task.sleep(for: .milliseconds(40))
+        do { try await downloader.install { _, _, _ in }; XCTFail("Concurrent transfer must be rejected") } catch { }
+        await downloader.cancel()
+        do { try await first.value; XCTFail("Expected cancellation of the original transfer") } catch { XCTAssertTrue(error is CancellationError) }
+    }
     final class FixtureProtocol: URLProtocol {
         static var payload = Data("0123456789".utf8)
         static var wrongRange = false
@@ -10,6 +54,11 @@ final class DownloadTests: XCTestCase {
         static var force200ForRange = false
         static var truncateResponse = false
         static var oversizedResponse = false
+        static func reset() {
+            payload = Data("0123456789".utf8)
+            wrongRange = false; delay = false; force200ForRange = false
+            truncateResponse = false; oversizedResponse = false
+        }
         override class func canInit(with request: URLRequest) -> Bool { true }
         override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
         override func startLoading() {
@@ -29,6 +78,7 @@ final class DownloadTests: XCTestCase {
     }
 
     func testResumesPartialRangeAndRejectsWrongContentRange() async throws {
+        Self.FixtureProtocol.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wispr-dl-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
         let payload = Data("0123456789".utf8); Self.FixtureProtocol.payload = payload; Self.FixtureProtocol.wrongRange = false
@@ -47,6 +97,7 @@ final class DownloadTests: XCTestCase {
     }
 
     func testExplicitCancelBecomesCancellationErrorAndKeepsPartial() async throws {
+        Self.FixtureProtocol.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wispr-cancel-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
         let payload = Data("0123456789".utf8); Self.FixtureProtocol.payload = payload; Self.FixtureProtocol.wrongRange = false; Self.FixtureProtocol.delay = true
@@ -69,13 +120,16 @@ final class DownloadTests: XCTestCase {
         let manifest = ModelManifest(version: 1, files: [file]); let destination = root.appendingPathComponent(file.path)
         try payload.write(to: destination); try Data(file.sha256.utf8).write(to: URL(fileURLWithPath: destination.path + ".verified"))
         let downloader = ModelDownloader(root: root, manifest: manifest)
-        XCTAssertTrue(try await downloader.installed())
+        let validInstalled = try await downloader.installed()
+        XCTAssertTrue(validInstalled)
         try Data(repeating: 0xFF, count: payload.count).write(to: destination)
-        XCTAssertFalse(try await downloader.installed())
+        let corruptedInstalled = try await downloader.installed()
+        XCTAssertFalse(corruptedInstalled)
     }
 
     func testHTTP200ResetsAStalePartialAndCompletes() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wispr-200-(UUID().uuidString)"); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
+        Self.FixtureProtocol.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wispr-200-\(UUID().uuidString)"); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
         let payload = Data("0123456789".utf8); Self.FixtureProtocol.payload = payload; Self.FixtureProtocol.force200ForRange = true; defer { Self.FixtureProtocol.force200ForRange = false }
         let hashURL = root.appendingPathComponent("hash"); try payload.write(to: hashURL)
         let file = ModelFile(path: "tiny.bin", url: URL(string: "fixture://reset")!, sha256: try ModelDownloader.digest(hashURL), size: Int64(payload.count), group: "speech"); let cfg = URLSessionConfiguration.ephemeral; cfg.protocolClasses = [Self.FixtureProtocol.self]
@@ -84,7 +138,8 @@ final class DownloadTests: XCTestCase {
     }
 
     func testTruncatedResponseResumesAndOversizedResponseFails() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wispr-trunc-(UUID().uuidString)"); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
+        Self.FixtureProtocol.reset()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wispr-trunc-\(UUID().uuidString)"); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
         let payload = Data("0123456789".utf8); Self.FixtureProtocol.payload = payload; Self.FixtureProtocol.truncateResponse = true
         let hashURL = root.appendingPathComponent("hash"); try payload.write(to: hashURL); let file = ModelFile(path: "tiny.bin", url: URL(string: "fixture://trunc")!, sha256: try ModelDownloader.digest(hashURL), size: Int64(payload.count), group: "speech"); let cfg = URLSessionConfiguration.ephemeral; cfg.protocolClasses = [Self.FixtureProtocol.self]; let downloader = ModelDownloader(root: root, manifest: ModelManifest(version: 1, files: [file]), sessionConfiguration: cfg)
         do { try await downloader.install { _,_,_ in }; XCTFail("expected incomplete response") } catch { }
@@ -94,6 +149,7 @@ final class DownloadTests: XCTestCase {
     }
 
     func testBadHashKeepsOneQuarantinePerFileAndClearsOlderOnes() async throws {
+        Self.FixtureProtocol.reset()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("voice-wispr-hash-\(UUID().uuidString)"); try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
         let payload = Data("bad-payload".utf8); Self.FixtureProtocol.payload = payload; let expected = Data("expected".utf8); let hashURL = root.appendingPathComponent("hash"); try expected.write(to: hashURL)
         final class Discarded: @unchecked Sendable { let lock = NSLock(); var names: [String] = []; func add(_ url: URL) { lock.lock(); names.append(url.lastPathComponent); lock.unlock(); try? FileManager.default.removeItem(at: url) } }

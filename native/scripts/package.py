@@ -62,7 +62,65 @@ p.add_argument(
     type=pathlib.Path,
     help="Existing uv 0.12.5 executable for the optional installer",
 )
+p.add_argument(
+    "--scratch-path",
+    type=pathlib.Path,
+    help="Task-owned SwiftPM build directory; reuse existing pinned dependencies",
+)
+p.add_argument(
+    "--jobs", type=int, default=4, help="Maximum concurrent compilation jobs"
+)
+p.add_argument(
+    "--app-only",
+    action="store_true",
+    help="Development or prepare-distribution app only; do not create an installer",
+)
+p.add_argument(
+    "--development-version",
+    help="Version label for a local development candidate; cannot override a public package",
+)
+p.add_argument(
+    "--development-build",
+    help="Build number for a local development candidate; requires --development-version",
+)
+p.add_argument(
+    "--prepare-distribution",
+    action="store_true",
+    help="Build and verify a Developer ID app locally; no notarization upload, installer or installation",
+)
 args = p.parse_args()
+if args.development_version or args.development_build:
+    if (
+        not args.development
+        or not args.development_version
+        or not args.development_build
+    ):
+        p.error(
+            "development version/build overrides require --development and both labels"
+        )
+    if not re.fullmatch(
+        r"[0-9]+(?:\.[0-9]+){1,2}", args.development_version
+    ) or not re.fullmatch(r"[1-9][0-9]*", args.development_build):
+        p.error("development version/build labels must be numeric")
+if args.jobs < 1:
+    p.error("--jobs must be positive")
+if args.prepare_distribution and (
+    args.development
+    or args.local_beta
+    or args.adhoc
+    or args.debug
+    or args.install
+    or args.notary_profile
+):
+    p.error(
+        "--prepare-distribution cannot be combined with development, beta, ad-hoc, debug, install or notarization modes"
+    )
+if args.app_only and (
+    not (args.development or args.prepare_distribution) or args.install
+):
+    p.error(
+        "--app-only requires --development or --prepare-distribution and cannot install"
+    )
 if args.local_beta and (
     args.development or args.adhoc or args.debug or args.notary_profile
 ):
@@ -79,7 +137,12 @@ if args.adhoc and not args.development:
     p.error("--adhoc requires --development; ad-hoc signing is never a public release")
 if args.debug and not args.development:
     p.error("--debug requires --development")
-if not args.development and not args.local_beta and not args.notary_profile:
+if (
+    not args.development
+    and not args.local_beta
+    and not args.prepare_distribution
+    and not args.notary_profile
+):
     p.error(
         "public packaging requires --notary-profile; use --development only for local testing"
     )
@@ -99,6 +162,11 @@ if public_key is not None:
     if len(decoded_key) != 32 or not any(decoded_key):
         p.error("invalid public update key")
 # Only a public fingerprint is stored here. The signing key stays in Keychain.
+apple_distribution = not args.development and not args.local_beta
+if apple_distribution and not args.sign_identity:
+    p.error(
+        "Apple distribution requires an explicit --sign-identity; the local beta identity is never reused implicitly"
+    )
 identity_file = root / ".local" / "signing-identity"
 local_identity_file = root / ".local" / "local-signing-identity"
 if args.local and local_identity_file.exists():
@@ -112,8 +180,8 @@ if identity == "-" and not args.adhoc:
         "stable signing identity missing (.local/local-signing-identity for local builds or .local/signing-identity); pass --adhoc only for a local test build"
     )
 if identity != "-":
-    # Explicit local development uses its own identity; public packages keep the publisher pin.
-    if not args.local:
+    # Local development keeps its identity; beta packages retain the publisher pin.
+    if not args.local and not apple_distribution:
         pinned = (
             (root / "Resources/release-signing-fingerprint.txt").read_text().strip()
         )
@@ -133,7 +201,13 @@ if not args.development and not args.local_beta:
         ["security", "find-identity", "-v", "-p", "codesigning"], text=True
     )
     matches = [line for line in valid.splitlines() if identity.upper() in line.upper()]
-    if not any('"Developer ID Application:' in line for line in matches):
+    from distribution_security import expected_team_id
+
+    team = expected_team_id()
+    if not any(
+        '"Developer ID Application:' in line and f'({team})"' in line
+        for line in matches
+    ):
         p.error(
             "existing valid Developer ID Application identity required; local signing cannot be distributed"
         )
@@ -194,10 +268,16 @@ if args.built_products:
         )
 else:
     run("python3", "scripts/bootstrap.py")
-    build_options = (["--sdk", str(args.sdk)] if args.sdk else []) + (
-        ["--build-system", args.build_system] if args.build_system else []
+    build_options = (
+        (["--sdk", str(args.sdk)] if args.sdk else [])
+        + (["--build-system", args.build_system] if args.build_system else [])
+        + (
+            ["--scratch-path", str(args.scratch_path.resolve())]
+            if args.scratch_path
+            else []
+        )
     )
-    run("swift", "build", *build_options, "-c", configuration, "-j", "4")
+    run("swift", "build", *build_options, "-c", configuration, "-j", str(args.jobs))
     build = pathlib.Path(
         subprocess.check_output(
             ["swift", "build", *build_options, "-c", configuration, "--show-bin-path"],
@@ -221,10 +301,13 @@ for name in ["MacOS", "Frameworks", "Resources"]:
     (contents / name).mkdir(parents=True)
 shutil.copy2(root / "Resources/Info.plist", contents / "Info.plist")
 info = plistlib.loads((contents / "Info.plist").read_bytes())
+if args.development_version:
+    info["CFBundleShortVersionString"] = args.development_version
+    info["CFBundleVersion"] = args.development_build
 info["AInautenDistributionMode"] = (
     "local-beta"
     if args.local_beta
-    else ("development" if args.development else "apple-notarized")
+    else ("development" if args.development else "apple-developer-id")
 )
 (contents / "Info.plist").write_bytes(plistlib.dumps(info))
 for language in ["de", "en"]:
@@ -266,9 +349,23 @@ run("python3", str(root / "scripts/bootstrap-speech-fallback.py"))
 fallback = root / "Vendor/upstream/speech-fallback"
 fallback_resources = contents / "Resources/SpeechFallback"
 fallback_resources.mkdir()
-shutil.copy2(fallback / "build/AInautenSpeechFallback", fallback_resources / "AInautenSpeechFallback")
-shutil.copy2(fallback / "ggml-small-q5_1.bin", fallback_resources / "ggml-small-q5_1.bin")
-run("codesign", "--force", "--options", "runtime", *timestamp_options, "--sign", identity, str(fallback_resources / "AInautenSpeechFallback"))
+shutil.copy2(
+    fallback / "build/AInautenSpeechFallback",
+    fallback_resources / "AInautenSpeechFallback",
+)
+shutil.copy2(
+    fallback / "ggml-small-q5_1.bin", fallback_resources / "ggml-small-q5_1.bin"
+)
+run(
+    "codesign",
+    "--force",
+    "--options",
+    "runtime",
+    *timestamp_options,
+    "--sign",
+    identity,
+    str(fallback_resources / "AInautenSpeechFallback"),
+)
 sparkle_distribution = root / ".build/artifacts/sparkle/Sparkle"
 sparkle = contents / "Frameworks/Sparkle.framework"
 shutil.copytree(
@@ -277,7 +374,10 @@ shutil.copytree(
     symlinks=True,
 )
 shutil.copytree(root / "Resources/Licenses", contents / "Resources/Licenses")
-shutil.copy2(root / "Vendor/upstream/whisper-306c88f4/LICENSE", contents / "Resources/Licenses/Whisper-MIT.txt")
+shutil.copy2(
+    root / "Vendor/upstream/whisper-306c88f4/LICENSE",
+    contents / "Resources/Licenses/Whisper-MIT.txt",
+)
 shutil.copy2(
     sparkle_distribution / "LICENSE", contents / "Resources/Licenses/Sparkle-MIT.txt"
 )
@@ -436,6 +536,12 @@ run("codesign", "--verify", "--deep", "--strict", str(app))
 # A build-machine resource fallback can hide a broken .app layout. Execute the
 # signed release's app-only resolver before accepting an installer.
 run(str(contents / "MacOS/VoiceWispr"), "--check-bundled-resources")
+if args.prepare_distribution:
+    from distribution_security import verify_distribution_app
+
+    print("PREPARED, NOT NOTARIZED", verify_distribution_app(app, notarized=False))
+    print("APP", app)
+    raise SystemExit(0)
 if args.local:
     verify_runtime(app)
     try:
@@ -462,6 +568,9 @@ else:
         from distribution_security import verify_local_beta_app
 
         print("VERIFIED LOCAL BETA", verify_local_beta_app(app))
+    if args.app_only:
+        print("APP", app)
+        raise SystemExit(0)
     dmg = create_dmg(app, out)
     if not args.development and not args.local_beta:
         # Apple checks the exact final DMG too; only Accepted may reach verification.

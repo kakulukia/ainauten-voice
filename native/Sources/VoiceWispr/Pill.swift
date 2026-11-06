@@ -136,7 +136,10 @@ private final class PillHostingView: NSHostingView<PillView> {
         panel.ignoresMouseEvents = false
         panel.level = .floating; panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.contentView = PillHostingView(rootView: PillView(model: model))
+        let content = PillHostingView(rootView: PillView(model: model))
+        // Window sizing belongs to setVisible; SwiftUI must not resize it later.
+        content.sizingOptions = []
+        panel.contentView = content
         position()
     }
     func setVisible(_ visible: Bool, loading: Bool = false) {
@@ -205,7 +208,7 @@ struct RecoveryView: View {
                         .help(L10n.text("recovery.undoHelp"))
                         .keyboardShortcut("z", modifiers: .command).pointerAwareFocus()
                 }
-                FeedbackCloseButton(remaining: model.recoveryCountdownRemaining, paused: model.recoveryCountdownPaused) { model.closeRecovery() }
+                FeedbackCloseButton(remaining: model.recoveryCountdownRemaining, paused: model.recoveryCountdownPaused, countdownEnabled: model.recoveryTransient) { model.closeRecovery() }
             }
             if model.recoveryFailureTitle != nil {
                 ScrollView {
@@ -219,6 +222,10 @@ struct RecoveryView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 3)
                 }
                 .frame(height: model.recoveryTextHeight)
+                if !model.recoveryTransient && !model.recoveryFooter.isEmpty {
+                    Text(model.recoveryFooter).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }.padding(.horizontal, 18).padding(.vertical, 14)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -232,6 +239,7 @@ struct RecoveryView: View {
 private struct FeedbackCloseButton: View {
     let remaining: TimeInterval
     let paused: Bool
+    let countdownEnabled: Bool
     let action: () -> Void
     @State private var hovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -240,18 +248,18 @@ private struct FeedbackCloseButton: View {
         Button(action: action) {
             ZStack {
                 Circle().stroke(Color.secondary.opacity(0.2), lineWidth: 1.5)
-                Circle().trim(from: 0, to: min(1, max(0, remaining / 5)))
+                if countdownEnabled { Circle().trim(from: 0, to: min(1, max(0, remaining / 5)))
                     .stroke(Color.secondary, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(reduceMotion || paused ? nil : .linear(duration: 0.1), value: remaining)
-                if hovered { Image(systemName: "xmark").font(.system(size: 9, weight: .medium)) }
+                    .animation(reduceMotion || paused ? nil : .linear(duration: 0.1), value: remaining) }
+                if hovered || !countdownEnabled { Image(systemName: "xmark").font(.system(size: 9, weight: .medium)) }
                 else if seconds > 0 { Text("\(seconds)").font(.system(size: 12, weight: .medium)).monospacedDigit() }
             }.frame(width: 20, height: 20).frame(width: 26, height: 26).contentShape(Rectangle())
         }.buttonStyle(.plain).foregroundStyle(.secondary)
             .onHover { hovered = $0 }
             .accessibilityLabel(L10n.text("recovery.closeAX"))
-            .accessibilityValue(paused ? L10n.text("recovery.timerPaused") : L10n.plural("recovery.secondsAX", count: seconds))
-            .help(paused ? L10n.text("recovery.closePausedHelp") : L10n.plural("recovery.secondsHelp", count: seconds))
+            .accessibilityValue(!countdownEnabled ? "" : paused ? L10n.text("recovery.timerPaused") : L10n.plural("recovery.secondsAX", count: seconds))
+            .help(!countdownEnabled ? L10n.text("recovery.closeAX") : paused ? L10n.text("recovery.closePausedHelp") : L10n.plural("recovery.secondsHelp", count: seconds))
             .keyboardShortcut("w", modifiers: .command).pointerAwareFocus()
     }
 }
