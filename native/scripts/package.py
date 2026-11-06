@@ -268,6 +268,10 @@ if args.built_products:
         )
 else:
     run("python3", "scripts/bootstrap.py")
+    if args.development:
+        from build_metadata import development_build_info
+
+        development_metadata = development_build_info(root)
     build_options = (
         (["--sdk", str(args.sdk)] if args.sdk else [])
         + (["--build-system", args.build_system] if args.build_system else [])
@@ -304,6 +308,8 @@ info = plistlib.loads((contents / "Info.plist").read_bytes())
 if args.development_version:
     info["CFBundleShortVersionString"] = args.development_version
     info["CFBundleVersion"] = args.development_build
+if args.development:
+    info.update(development_metadata)
 info["AInautenDistributionMode"] = (
     "local-beta"
     if args.local_beta
