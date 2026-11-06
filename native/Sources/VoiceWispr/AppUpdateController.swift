@@ -20,8 +20,7 @@ import VoiceWisprCore
     var busy: () -> Bool = { false }
 
     var version: String {
-        let info = Bundle.main.infoDictionary ?? [:]
-        return "\(info["CFBundleShortVersionString"] as? String ?? "0.1.1") (\(info["CFBundleVersion"] as? String ?? "3"))"
+        UpdatePolicy.displayVersion(Bundle.main.infoDictionary ?? [:])
     }
     func start() {
         guard controller == nil, UpdatePolicy.configured(Bundle.main.infoDictionary ?? [:]) else { return }

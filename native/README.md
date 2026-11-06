@@ -26,6 +26,8 @@ Unter **Diktieren → Nur in der Menüleiste anzeigen** lässt sich das Dock-Sym
 
 ## Entwickeln
 
+Dev-Builds zeigen automatisch die ersten vier Zeichen des Git-Commits und das lokale Build-Datum, zum Beispiel `dev 0780 · 2026-11-06`. Ein `+` am Hash kennzeichnet noch nicht committete Änderungen im nativen Projekt. Die vollständige Revision und die Build-Metadaten stehen im App-Bundle; reguläre Release-Versionsnummern bleiben erhalten.
+
 Command Line Tools mit Swift 6.2+ oder passendes Xcode, Python 3 nur für den Paketbau. Für die normale Agent-Installation nutze die geprüfte Download-Beta gemäß [Installationsanleitung](../docs/agent-installation.md). Der Paketbau des optionalen Forschungs-Installers setzt derzeit zusätzlich uv 0.12.5 aus Homebrew voraus; `scripts/package.py` prüft den festen Paketpfad. Endnutzer benötigen keine Entwicklungswerkzeuge und keinen separaten Server.
 
 ```sh

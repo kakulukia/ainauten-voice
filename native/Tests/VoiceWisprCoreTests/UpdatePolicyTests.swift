@@ -2,6 +2,25 @@ import XCTest
 @testable import VoiceWisprCore
 
 final class UpdatePolicyTests: XCTestCase {
+    func testDevelopmentVersionUsesFourCommitCharactersAndBuildDate() {
+        var info: [String: Any] = ["AInautenDistributionMode": "development",
+            "AInautenBuildCommit": "078010debe66bf5285a6a13358370c530611f19f", "AInautenBuildDate": "2026-11-06",
+            "CFBundleShortVersionString": "0.1.20", "CFBundleVersion": "27"]
+        XCTAssertEqual(UpdatePolicy.displayVersion(info), "dev 0780 · 2026-11-06")
+        info["AInautenBuildDirty"] = true
+        XCTAssertEqual(UpdatePolicy.displayVersion(info), "dev 0780+ · 2026-11-06")
+        info.removeValue(forKey: "AInautenDistributionMode"); info["AInautenLocalBuild"] = true
+        XCTAssertEqual(UpdatePolicy.displayVersion(info), "dev 0780+ · 2026-11-06")
+    }
+    func testDevelopmentWithoutSourceMetadataDoesNotShowAnOldReleaseVersion() {
+        XCTAssertEqual(UpdatePolicy.displayVersion(["AInautenDistributionMode": "development",
+            "CFBundleShortVersionString": "0.1.14", "CFBundleVersion": "18"]), "dev ? · ?")
+    }
+    func testPublicVersionKeepsItsReleaseAndBuildNumbers() {
+        XCTAssertEqual(UpdatePolicy.displayVersion(["AInautenDistributionMode": "apple-developer-id",
+            "CFBundleShortVersionString": "0.1.20", "CFBundleVersion": "27",
+            "AInautenBuildCommit": "078010d", "AInautenBuildDate": "2026-11-06"]), "0.1.20 (27)")
+    }
     private var valid: [String: Any] { [
         "CFBundleIdentifier": "com.mediapublishing.VoiceWispr",
         "SUFeedURL": UpdatePolicy.feedURL,
