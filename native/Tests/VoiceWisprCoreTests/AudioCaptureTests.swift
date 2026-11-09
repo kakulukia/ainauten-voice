@@ -41,6 +41,30 @@ private final class CaptureTestDriver: AudioCaptureDriving, @unchecked Sendable 
 }
 
 final class AudioCaptureTests: XCTestCase {
+    @MainActor func testOpeningAudioIsRetainedWhileMediaPreparationIsPending() async throws {
+        var reply: CheckedContinuation<String?, Never>?
+        var commands: [[String]] = []
+        let media = MediaPlaybackPause { args in
+            commands.append(args)
+            if args == ["pause"] { return await withCheckedContinuation { reply = $0 } }
+            return nil
+        }
+        let driver = CaptureTestDriver()
+        let capture = AudioCapture(driver: driver, microphoneAuthorized: { true })
+        let id = UUID()
+        media.beginPause(for: id)
+        try capture.start(onSamples: { _, _ in }, onError: { _ in })
+        let started = await Task.detached { driver.started.wait(timeout: .now() + 1) }.value
+        XCTAssertEqual(started, .success)
+        while reply == nil { await Task.yield() }
+        driver.emit([0.8, 0.6, 0.4])
+        driver.emit([0.2, 0.1])
+        XCTAssertEqual(capture.stop(), [0.8, 0.6, 0.4, 0.2, 0.1])
+        media.resume(for: id)
+        reply?.resume(returning: "player")
+        await media.finishPendingCommands()
+        XCTAssertEqual(commands, [["pause"], ["resume", "player"]])
+    }
     func testConversionFollowsDeliveredFormatAcrossDeviceRateChanges() throws {
         let converter = AudioCaptureConverter()
         for (rate, channels) in [(48_000.0, 1), (44_100.0, 1), (48_000.0, 2), (16_000.0, 1), (44_100.0, 1), (48_000.0, 1)] {

@@ -22,6 +22,8 @@ Bei Halten-Kürzeln mit Cmd, Strg oder Alt und einer beliebigen weiteren Taste g
 
 Für den Freihändig-Modus die vollständige Kombination zweimal kurz drücken und loslassen. Kürzel ohne Modifier sowie reine Shift-/Fn-Kombinationen behalten ihr bisheriges Loslass-Verhalten.
 
+Entwicklungskandidat: Die Mikrofonaufnahme startet vor der Zielfeldprüfung und Modellvorbereitung; die Medienpause läuft parallel. Anfangsdaten bleiben auch bei frühem Loslassen erhalten. Bis zum ersten tatsächlich gelieferten Audioblock zeigt das Overlay eine Sanduhr, danach die Frequenzanzeige. Der Audiogerätestart selbst kann weiterhin Zeit benötigen. Es wird kein Audio vor Betätigung des Kürzels aufgenommen.
+
 ## Menüleiste und Dock
 
 Unter **Diktieren → Nur in der Menüleiste anzeigen** lässt sich das Dock-Symbol sofort ausblenden. Die Auswahl bleibt nach einem Neustart erhalten. Einstellungen sind weiterhin über das Menüleistensymbol erreichbar; bestehende Profile zeigen das Dock-Symbol, bis die Option eingeschaltet wird. Cmd+H schließt im Menüleistenmodus das aktive Fenster. Mit Dock-Symbol blendet Cmd+H die App aus.

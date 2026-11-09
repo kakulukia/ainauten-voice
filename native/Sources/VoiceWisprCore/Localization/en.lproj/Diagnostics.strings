@@ -7,6 +7,7 @@
 "capture.deviceChanged" = "The microphone changed. The current dictation will finish.";
 "capture.startTimedOut" = "The microphone is not providing audio. Check the input device and start dictation again.";
 "capture.recordingAX" = "Recording in progress";
+"capture.startingAX" = "Microphone starting. Please wait briefly.";
 "camera.permission" = "Allow camera access for the lip-reading beta.";
 "camera.running" = "A camera recording is already running.";
 "camera.missing" = "No camera found.";

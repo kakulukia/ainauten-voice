@@ -3,6 +3,51 @@ import JavaScriptCore
 @testable import VoiceWisprCore
 
 final class MediaPlaybackPauseTests: XCTestCase {
+    @MainActor func testNextImmediateCaptureKeepsOwnedPlayerPausedUntilItsFinalStop() async {
+        var calls: [[String]] = []
+        var reply: CheckedContinuation<String?, Never>?
+        let media = MediaPlaybackPause { args in
+            calls.append(args)
+            if calls.count == 1 { return await withCheckedContinuation { reply = $0 } }
+            return nil
+        }
+        let first = UUID(), second = UUID()
+        media.beginPause(for: first)
+        while reply == nil { await Task.yield() }
+        media.resume(for: first)
+        media.beginPause(for: second)
+        reply?.resume(returning: "player")
+        await media.finishPendingCommands()
+        XCTAssertEqual(calls, [["pause"], ["pause"]])
+        media.resume(for: second)
+        await media.finishPendingCommands()
+        XCTAssertEqual(calls, [["pause"], ["pause"], ["resume", "player"]])
+    }
+    @MainActor func testStopBeforeScheduledPauseStartsNeverTouchesPlayback() async {
+        var calls: [[String]] = []
+        let media = MediaPlaybackPause { calls.append($0); return "player" }
+        let id = UUID()
+        media.beginPause(for: id)
+        media.resume(for: id)
+        await media.finishPendingCommands()
+        XCTAssertTrue(calls.isEmpty)
+    }
+    @MainActor func testBeginningPauseDoesNotWaitAndImmediateStopRetainsResumeOwnership() async {
+        var calls: [[String]] = []
+        var reply: CheckedContinuation<String?, Never>?
+        let media = MediaPlaybackPause { args in
+            calls.append(args)
+            if args == ["pause"] { return await withCheckedContinuation { reply = $0 } }
+            return nil
+        }
+        let id = UUID()
+        XCTAssertTrue(media.beginPause(for: id))
+        while reply == nil { await Task.yield() }
+        media.resume(for: id)
+        reply?.resume(returning: "player")
+        await media.finishPendingCommands()
+        XCTAssertEqual(calls, [["pause"], ["resume", "player"]])
+    }
     @MainActor func testConfirmedPauseResumesOnceAndIgnoresStaleSession() async {
         var calls: [[String]] = []
         let media = MediaPlaybackPause { calls.append($0); return $0 == ["pause"] ? "player" : nil }

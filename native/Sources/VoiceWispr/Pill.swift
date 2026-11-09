@@ -75,6 +75,10 @@ struct PillView: View {
                 if model.lipSession {
                     Image(systemName: "camera.fill").frame(width: 40, height: 20)
                         .accessibilityLabel(p("pill.lipRecording", model.durationLabel))
+                } else if !model.captureReady {
+                    Image(systemName: "hourglass").frame(width: 40, height: 20)
+                        .accessibilityLabel(L10n.text("capture.startingAX"))
+                        .help(L10n.text("capture.startingAX"))
                 } else {
                 HStack(spacing: 2) {
                     ForEach(0..<9, id: \.self) { i in

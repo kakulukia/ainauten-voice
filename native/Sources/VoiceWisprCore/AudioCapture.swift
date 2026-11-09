@@ -47,7 +47,7 @@ public final class AudioCapture: @unchecked Sendable {
     public typealias SamplesHandler = @Sendable ([Float]) -> Void
     public typealias LevelHandler = @Sendable (Float) -> Void
     public typealias ErrorHandler = @Sendable (Error) -> Void
-    private let sessionQueue = DispatchQueue(label: "com.mediapublishing.voice.audio.session")
+    private let sessionQueue = DispatchQueue(label: "com.mediapublishing.voice.audio.session", qos: .userInitiated)
     private let lock = NSLock()
     private let driver: any AudioCaptureDriving
     private let startupTimeout: TimeInterval

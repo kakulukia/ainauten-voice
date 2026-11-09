@@ -1014,6 +1014,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         guard sessionID == id, state == .recording, !captureReady, offset == 0, count > 0 else { return }
         captureReady = true
         captureStartupMilliseconds = max(0, receivedAt - requestedAt) * 1000
+        announceState()
     }
     func start(practice: Bool = false) {
         if !practice && !previewMode { startQueuedCapture(); return }
@@ -1058,6 +1059,43 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         operation = Task {
             do {
                 guard sessionID == id, !Task.isCancelled else { return }
+                #if DEBUG
+                let syntheticPractice = practice && practiceFixture != nil
+                #else
+                let syntheticPractice = false
+                #endif
+                if !syntheticPractice {
+                    mediaPlayback.beginPause(for: id)
+                    let offsets = CaptureSampleOffsets()
+                    try capture.start(onSamples: { [weak self] samples, level in
+                        // Capture the clock on the audio callback, before actor scheduling.
+                        let receivedAt = ProcessInfo.processInfo.systemUptime
+                        let offset = offsets.reserve(samples.count)
+                        Task { @MainActor in guard let self, self.sessionID == id, self.state == .recording else { return }; self.level = level
+                            self.receivedCaptureAudio(session: id, offset: offset, count: samples.count, receivedAt: receivedAt, requestedAt: requestedAt)
+                            self.pendingSamples[offset] = samples
+                            while let contiguous = self.pendingSamples.removeValue(forKey: self.acceptedSamples) {
+                                self.spectrumLevels = self.spectrumMeter.levels(for: contiguous)
+                                self.acceptedSamples += contiguous.count
+                                let prior = self.appendTask
+                                let initialization = self.operation
+                                self.appendTask = Task {
+                                    await prior?.value
+                                    // Capture begins immediately. Keep early PCM while
+                                    // model/dictionary preparation finishes in parallel.
+                                    await initialization?.value
+                                    guard self.sessionID == id, !Task.isCancelled, let pipeline = self.pipeline else { return }
+                                    do { try await pipeline.append(samples: contiguous) } catch { if self.sessionID == id { self.fail(error.localizedDescription) } }
+                                }
+                            }
+                        }
+                    }, onError: { [weak self] message in Task { @MainActor in if self?.sessionID == id { self?.fail(message) } } }, onCompletion: { [weak self] in Task { @MainActor in guard let self, self.sessionID == id else { return }; self.stop() } })
+                    startedAt = ProcessInfo.processInfo.systemUptime
+                    clock = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in Task { @MainActor in guard let self, self.sessionID == id, self.state == .recording else { return }; self.elapsed = ProcessInfo.processInfo.systemUptime - self.startedAt
+                        if self.practiceSession && self.practiceStopper.shouldStop(level: self.level, elapsed: self.elapsed) { self.stop(); return }
+                        if self.elapsed >= 1200 { self.stop() } else if self.elapsed >= 1140 { self.status = "Noch eine Minute bis zum Aufnahmelimit" }
+                    } }
+                }
                 // Keep synchronous AX queries outside the event-tap callback.
                 if let targetPID {
                     inputFocusRecovery = InputFocusRecovery.capture(expectedPID: targetPID)
@@ -1075,53 +1113,19 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                     return CloudFormatter(endpoint: endpoint, model: settings.cloudModel, key: key)
                 }
                 let pipeline = ProcessingPipeline(speech: selectedSpeech, formatter: selectedFormatter); self.pipeline = pipeline
-                // An immediate release still needs pipeline initialization so Stop can finish.
+                // Stop may arrive during AX or decoder setup. Its in-memory
+                // audio must still be processed through this initialized pipeline.
                 if state != .recording {
                     try await pipeline.start(sessionID: id, style: style, dictionary: dictionary, languages: languages)
                     return
                 }
                 #if DEBUG
-                if practice && practiceFixture != nil {
+                if syntheticPractice {
                     try await pipeline.start(sessionID: id, style: style, dictionary: dictionary, languages: languages)
                     guard sessionID == id, state == .recording else { return }
                     captureReady = true; level = 0.65; return
                 }
                 #endif
-                await mediaPlayback.pause(for: id)
-                guard sessionID == id, !Task.isCancelled else { return }
-                if state != .recording {
-                    try await pipeline.start(sessionID: id, style: style, dictionary: dictionary, languages: languages)
-                    return
-                }
-                let offsets = CaptureSampleOffsets()
-                try capture.start(onSamples: { [weak self] samples, level in
-                    // Capture the clock on the audio callback, before actor scheduling.
-                    let receivedAt = ProcessInfo.processInfo.systemUptime
-                    let offset = offsets.reserve(samples.count)
-                    Task { @MainActor in guard let self, self.sessionID == id, self.state == .recording else { return }; self.level = level
-                        self.receivedCaptureAudio(session: id, offset: offset, count: samples.count, receivedAt: receivedAt, requestedAt: requestedAt)
-                        self.pendingSamples[offset] = samples
-                        while let contiguous = self.pendingSamples.removeValue(forKey: self.acceptedSamples) {
-                            self.spectrumLevels = self.spectrumMeter.levels(for: contiguous)
-                            self.acceptedSamples += contiguous.count
-                            let prior = self.appendTask
-                            let initialization = self.operation
-                            self.appendTask = Task {
-                                await prior?.value
-                                // Capture begins immediately. Keep early PCM while
-                                // model/dictionary preparation finishes in parallel.
-                                await initialization?.value
-                                guard self.sessionID == id, !Task.isCancelled else { return }
-                                do { try await pipeline.append(samples: contiguous) } catch { if self.sessionID == id { self.fail(error.localizedDescription) } }
-                            }
-                        }
-                    }
-                }, onError: { [weak self] message in Task { @MainActor in if self?.sessionID == id { self?.fail(message) } } }, onCompletion: { [weak self] in Task { @MainActor in guard let self, self.sessionID == id else { return }; self.stop() } })
-                startedAt = ProcessInfo.processInfo.systemUptime
-                clock = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in Task { @MainActor in guard let self, self.sessionID == id, self.state == .recording else { return }; self.elapsed = ProcessInfo.processInfo.systemUptime - self.startedAt
-                    if self.practiceSession && self.practiceStopper.shouldStop(level: self.level, elapsed: self.elapsed) { self.stop(); return }
-                    if self.elapsed >= 1200 { self.stop() } else if self.elapsed >= 1140 { self.status = "Noch eine Minute bis zum Aufnahmelimit" }
-                } }
                 try await pipeline.start(sessionID: id, style: style, dictionary: dictionary, languages: languages)
                 guard sessionID == id else { await pipeline.cancel(); return }
             } catch { if sessionID == id { fail(error.localizedDescription) } }
@@ -1228,7 +1232,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     }
     /// VoiceOver users otherwise get no feedback while focus stays in the target app.
     private func announceState() {
-        let message: String? = switch state { case .recording: L10n.text("capture.recordingAX"); case .success: status; case .error: status; default: nil }
+        let message: String? = switch state { case .recording: L10n.text(captureReady || lipSession ? "capture.recordingAX" : "capture.startingAX"); case .success: status; case .error: status; default: nil }
         guard let message, !message.isEmpty, !previewMode else { return }
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
@@ -1748,26 +1752,9 @@ extension AppModel {
         let requestedAt = ProcessInfo.processInfo.systemUptime
         let targetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         job.initialization = Task { [weak self] in
-            guard let self else { return }
-            if let targetPID { job.focus = await FocusSnapshot.captureWithRetry(expectedPID: targetPID) }
-            guard self.queuedCapture?.id == job.id, !job.stopped, !Task.isCancelled else { return }
-            if let anchor = self.queuedInsertionAnchor, job.focus?.matches(anchor) == true { job.followsConfirmedInsertion = true }
-            let style = job.settings.style(for: job.focus?.bundleID)
-            job.history = HistoryCaptureContext(date: job.capturedAt, style: style,
-                bundleID: job.focus?.bundleID,
-                appName: job.focus.flatMap { NSRunningApplication(processIdentifier: $0.pid)?.localizedName },
-                enabled: job.settings.historyEnabled ?? true)
+            guard let self, self.queuedCapture?.id == job.id, !job.stopped, !Task.isCancelled else { return }
             do {
-                if stream { job.pipeline = try self.makeQueuedPipeline(for: job) }
-                await self.mediaPlayback.pause(for: job.id)
-                guard !Task.isCancelled else { return }
-                if job.stopped {
-                    if let pipeline = job.pipeline {
-                        try await pipeline.start(sessionID: job.id, style: style, dictionary: job.dictionary, languages: job.languages)
-                    }
-                    return
-                }
-                guard self.queuedCapture?.id == job.id else { return }
+                self.mediaPlayback.beginPause(for: job.id)
                 let offsets = CaptureSampleOffsets()
                 try self.capture.start(onSamples: { [weak self] samples in
                     let rms = sqrt(samples.reduce(Float(0)) { $0 + $1 * $1 } / Float(max(1, samples.count)))
@@ -1780,8 +1767,9 @@ extension AppModel {
                         self.receivedCaptureAudio(session: job.id, offset: offset, count: samples.count,
                             receivedAt: receivedAt, requestedAt: requestedAt)
                         self.spectrumLevels = self.spectrumMeter.levels(for: samples)
-                        guard let pipeline = job.pipeline else { return }
+                        guard stream else { return }
                         job.blocks[offset] = samples
+                        guard let pipeline = job.pipeline else { return }
                         while let contiguous = job.blocks.removeValue(forKey: job.accepted) {
                             job.accepted += contiguous.count
                             let prior = job.append, initialization = job.initialization
@@ -1809,6 +1797,17 @@ extension AppModel {
                         if self.elapsed >= 1200 { self.stopQueuedCapture() }
                     }
                 }
+                // Record the opening audio while AX, keychain and decoder setup
+                // finish. Stop retains those samples even during initialization.
+                if let targetPID { job.focus = await FocusSnapshot.captureWithRetry(expectedPID: targetPID) }
+                guard !Task.isCancelled, self.dictationJobs[job.id] === job else { return }
+                if let anchor = self.queuedInsertionAnchor, job.focus?.matches(anchor) == true { job.followsConfirmedInsertion = true }
+                let style = job.settings.style(for: job.focus?.bundleID)
+                job.history = HistoryCaptureContext(date: job.capturedAt, style: style,
+                    bundleID: job.focus?.bundleID,
+                    appName: job.focus.flatMap { NSRunningApplication(processIdentifier: $0.pid)?.localizedName },
+                    enabled: job.settings.historyEnabled ?? true)
+                if stream { job.pipeline = try self.makeQueuedPipeline(for: job) }
                 if let pipeline = job.pipeline {
                     try await pipeline.start(sessionID: job.id, style: style, dictionary: job.dictionary, languages: job.languages)
                 }

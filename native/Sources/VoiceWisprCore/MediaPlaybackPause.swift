@@ -1,25 +1,36 @@
 import Foundation
 
-/// Serializes media commands so an early stop or a new recording cannot leave
-/// a delayed Play command running during the next microphone capture.
+/// Serializes media commands and carries pause ownership into an immediate
+/// follow-up capture instead of dispatching its still-pending resume.
 @MainActor public final class MediaPlaybackPause {
     private let run: ([String]) async -> String?
     private var session: UUID?
     private var operation: Task<String?, Never>?
+    private var capturesWhilePreparing = false
 
     public convenience init() { self.init(run: Self.runScript) }
     init(run: @escaping ([String]) async -> String?) { self.run = run }
 
-    public func pause(for id: UUID) async {
-        guard session == nil, !Task.isCancelled else { return }
+    /// Claim the session synchronously so Stop can resume even while the
+    /// asynchronous player query is pending. Audio startup need not wait for it.
+    @discardableResult public func beginPause(for id: UUID) -> Bool {
+        schedulePause(for: id, capturesWhilePreparing: true)
+    }
+    private func schedulePause(for id: UUID, capturesWhilePreparing: Bool) -> Bool {
+        guard session == nil, !Task.isCancelled else { return false }
         session = id
+        self.capturesWhilePreparing = capturesWhilePreparing
         let previous = operation
         let task = Task<String?, Never> {
-            _ = await previous?.value
+            let inheritedPlayer = await previous?.value
             guard self.session == id, !Task.isCancelled else { return nil }
-            return await self.run(["pause"])
+            return await self.run(["pause"]) ?? inheritedPlayer
         }
         operation = task
+        return true
+    }
+    public func pause(for id: UUID) async {
+        guard schedulePause(for: id, capturesWhilePreparing: false), let task = operation else { return }
         _ = await task.value
     }
     public func resume(for id: UUID? = nil) {
@@ -28,6 +39,7 @@ import Foundation
         let previous = operation
         operation = Task {
             guard let player = await previous?.value, !Task.isCancelled else { return nil }
+            guard self.session == nil || !self.capturesWhilePreparing else { return player }
             _ = await self.run(["resume", player])
             return nil
         }
