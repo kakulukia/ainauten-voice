@@ -206,9 +206,13 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     /// A new feedback generation invalidates old timers, independent of translation.
     private var statusRevision: UInt64 = 0
     @Published var level: Float = 0
-    @Published private(set) var spectrumLevels = [Float](repeating: 0, count: AudioSpectrumMeter.bandCount)
+    @Published private(set) var spectrumLevels = [Float](repeating: 0, count: AudioSpectrumMeter.bandCount) {
+        didSet { updateStatusSpectrum() }
+    }
     private var spectrumMeter = AudioSpectrumMeter()
-    @Published var captureReady = false
+    @Published var captureReady = false {
+        didSet { if captureReady != oldValue { updateStatusItem() } }
+    }
     /// Start request to the first normalized microphone block, not keydown or UI rendering.
     @Published var captureStartupMilliseconds: Double?
     /// Stable UI state for a delayed recording pipeline; views must not parse
@@ -391,7 +395,8 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
     private var statusItem: NSStatusItem?
     private var pauseMenuItem: NSMenuItem?
     private var wisprMenuItem: NSMenuItem?
-    private var statusSymbol = "waveform"
+    private var statusSymbol: String? = "waveform"
+    private var lastStatusSpectrumFrame: TimeInterval = -.infinity
     private var sleepInterrupted = false
     private var memoryPressure: DispatchSourceMemoryPressure?
     private var loading = true
@@ -713,13 +718,32 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         let paused = document.settings.paused
         pauseMenuItem?.state = paused ? .off : .on
         wisprMenuItem?.isHidden = !wisprInstalled
-        let symbol = state == .loading ? "hourglass" : paused ? "mic.slash" : "waveform"
-        statusItem?.button?.toolTip = status
-        statusItem?.button?.setAccessibilityLabel(status)
+        let recordingAudio = state == .recording && !lipSession && !paused
+        let label = recordingAudio ? L10n.text(captureReady ? "capture.recordingAX" : "practice.microphoneStarting") : status
+        statusItem?.button?.toolTip = label
+        statusItem?.button?.setAccessibilityLabel(label)
+        if recordingAudio && captureReady && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            if statusSymbol != nil {
+                statusSymbol = nil
+                lastStatusSpectrumFrame = -.infinity
+                updateStatusSpectrum()
+            }
+            return
+        }
+        let symbol = state == .loading || (recordingAudio && !captureReady) ? "hourglass" :
+            paused ? "mic.slash" : recordingAudio ? "mic.fill" : "waveform"
         if statusSymbol != symbol {
             statusSymbol = symbol
-            statusItem?.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: status)
+            statusItem?.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         }
+    }
+
+    private func updateStatusSpectrum() {
+        guard statusSymbol == nil, let button = statusItem?.button else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastStatusSpectrumFrame >= 0.1 else { return }
+        lastStatusSpectrumFrame = now
+        button.image = StatusSpectrum.image(levels: spectrumLevels)
     }
     @objc private func selectInterfaceLanguage(_ sender: NSMenuItem) {
         guard let value = sender.representedObject as? String, let language = InterfaceLanguage(rawValue: value) else { return }
