@@ -192,7 +192,14 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         scheduleSave(); updateHotkey()
         if document.settings.menuBarOnly != oldValue.settings.menuBarOnly { updateActivationPolicy() }
     } }
-    @Published var state: PillState = .loading { didSet { updatePillVisibility(); updateStatusItem(); if state != oldValue { announceState() } } }
+    @Published var state: PillState = .loading {
+        didSet {
+            if state != .loading { showsLoadingPill = false }
+            updatePillVisibility(); updateStatusItem()
+            if state != oldValue { announceState() }
+        }
+    }
+    private var showsLoadingPill = false
     @Published private var statusMessage: LocalizedMessage = .key("status.starting", [])
     private var preparationStatusMessage: LocalizedMessage = .key("status.starting", [])
     var status: String {
@@ -323,7 +330,8 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         set { errorMessageMessage = newValue.map { L10n.message($0) } }
     }
     var practiceComplete: Bool { document.settings.practiceCompleted ?? document.settings.onboardingComplete }
-    @Published var loginEnabled = SMAppService.mainApp.status == .enabled
+    @Published var loginEnabled = false
+    private var loginStatusTask: Task<Void, Never>?
     @Published var canUndoImport = false
     @Published var shortcutCapture = false { didSet { updateHotkey() } }
     @Published var settingsNavigation: SettingsNavigation?
@@ -616,8 +624,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                 reports.record(component: .settings, code: .settingsLoadFailed)
             }
             updateActivationPolicy()
-            loading = false; preparing = true
-            preparationStatusMessage = .key("status.modelsChecking", [])
+            loading = false
             wisprInstalled = WisprSwitch.installedURL != nil
             refreshImportPreview()
             canUndoImport = FileManager.default.fileExists(atPath: ModelPaths.support.appendingPathComponent("wispr-import-undo.json").path)
@@ -625,10 +632,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
             settingsNavigation = SettingsNavigation(section: document.settings.onboardingComplete ? .overview : .setup, setupStep: nil)
             refreshHistory()
             if !document.settings.onboardingComplete { showSettings() }
-            let installed = (try? await downloader.installed()) == true
-            preparing = false
-            baseModelsReady = installed
-            if installed || swissEnabled { await prepareModels() }
+            await prepareModels()
             if lipEnabled { prepareLipReading() }
             updateHotkey()
         }
@@ -789,8 +793,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         if conflict && state == .recording && !practiceSession { stop() }
         // Finish setup as soon as every prerequisite holds, e.g. Accessibility granted after the probe.
         if !loading && !previewMode && !document.settings.onboardingComplete && canCompleteSetup && !conflict { markSetupComplete() }
-        let actualLogin = SMAppService.mainApp.status == .enabled
-        if loginEnabled != actualLogin { loginEnabled = actualLogin }
+        if settingsOpen { refreshLoginStatus() }
         if state == .recording, let pipeline { Task { let backlog = await pipeline.backlogSeconds(); if self.state == .recording { self.recordingDelayed = backlog > 30; if backlog > 30 { self.status = "Verarbeitung verzögert sich. Audio bleibt erhalten." } } } }
         updateHotkey()
     }
@@ -813,11 +816,21 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         hotkey.shortcut = document.settings.shortcut
         hotkey.bindings = document.settings.shortcutBindings ?? ShortcutBindings()
         updateLipHotkey()
-        let allowed = !preparing && modelsReady && (!swissEnabled || swissReady) && microphoneGranted && accessibilityGranted && !lipSession && !conflict && !document.settings.paused && !shortcutCapture
+        let shortcutsAvailable = accessibilityGranted && !lipSession && !conflict && !document.settings.paused && !shortcutCapture
+        let allowed = !preparing && modelsReady && (!swissEnabled || swissReady) && microphoneGranted && shortcutsAvailable
+        let canShowLoadingPill = !loading && preparing && shortcutsAvailable
+        hotkey.onUnavailableDictationShortcut = canShowLoadingPill ? { [weak self] in
+            Task { @MainActor in
+                guard let self, !self.quitting, self.state == .loading, self.hotkey.onUnavailableDictationShortcut != nil,
+                      !self.showsLoadingPill else { return }
+                self.showsLoadingPill = true
+                self.updatePillVisibility()
+            }
+        } : nil
         // A result panel, including manual history/partial text, never blocks
         // a new dictation. start() closes it while retaining the hold gesture.
         hotkey.enabled = allowed && acceptsDictationGesture
-        if allowed { _ = hotkey.install() }
+        if allowed || canShowLoadingPill { _ = hotkey.install() }
         guard state != .recording && state != .processing && state != .success && state != .error else { return }
         let nextState: PillState = allowed ? .ready : preparing || loading ? .loading : conflict ? .conflict : document.settings.paused ? .paused : .needsSetup
         let nextStatus = allowed ? (swissEnabled ? L10n.text("swiss.ready") : "Bereit zum Diktieren") : preparing || loading ? preparationStatusMessage.text : conflict ? "Wispr Flow läuft. Bitte den Wechsel abschließen." : document.settings.paused ? "Tastenkürzel ausgeschaltet" : swissEnabled && !swissReady ? swissStatus : !modelsReady ? "Modelle einrichten" : !microphoneGranted ? "Mikrofon freigeben" : "Bedienungshilfen freigeben"
@@ -889,7 +902,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         speechProfileNeedsPreparation = false
         let swiss = swissEnabled
         modelsReady = false; swissReady = false
-        preparationStatusMessage = .key("status.speechLoading", [])
+        preparationStatusMessage = .key("status.modelsChecking", [])
         preparing = true; state = .loading; status = preparationStatusMessage.text; updateHotkey()
         do {
             if swiss {
@@ -903,6 +916,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                     swissStatusMessage = .key(swissNeedsBaseModels ? "swiss.baseRequired" : "swiss.modelRequired", [])
                     preparing = false; state = .needsSetup; updateHotkey(); return
                 }
+                preparationStatusMessage = .key("status.speechLoading", []); status = preparationStatusMessage.text
                 try await swissSpeech.prepare()
                 if needsFormatter { try await formatter.prepare() }
                 guard speechPreparationID == token, !quitting else { return }
@@ -911,6 +925,7 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
                 baseModelsReady = try await downloader.installed()
                 guard speechPreparationID == token, !quitting else { return }
                 if !baseModelsReady { preparing = false; state = .needsSetup; updateHotkey(); return }
+                preparationStatusMessage = .key("status.speechLoading", []); status = preparationStatusMessage.text
                 try await speech.prepare()
                 guard speechPreparationID == token, !quitting else { return }
                 preparationStatusMessage = .key("status.formatterLoading", []); status = preparationStatusMessage.text
@@ -1338,10 +1353,11 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         }
         NSApplication.shared.activate(ignoringOtherApps: true); settingsWindow?.makeKeyAndOrderFront(nil)
         settingsOpen = true; updatePillVisibility()
+        if !previewMode { refreshLoginStatus() }
     }
     func closeSettings() { settingsWindow?.performClose(nil) }
     private func updatePillVisibility() {
-        let active = state == .loading || state == .recording || state == .processing || state == .success || (state == .error && recoveryWindow?.isVisible != true)
+        let active = (state == .loading && (showsLoadingPill || previewMode)) || state == .recording || state == .processing || state == .success || (state == .error && recoveryWindow?.isVisible != true)
         #if DEBUG
         if previewMode, CommandLine.arguments.contains("--test-delivery") { pill?.setVisible(!quitting); return }
         #endif
@@ -1621,10 +1637,23 @@ private struct NoSpeechDetected: LocalizedError { let errorDescription: String? 
         showRecovery(activate: false, resultID: results[index].id, transient: recoveryCanUndo)
     }
     func saveKey(_ key: String) { do { try KeychainStorage().setKey(key) } catch { errorMessage = "API-Schlüssel konnte nicht im Schlüsselbund gespeichert werden." } }
+    private func refreshLoginStatus() {
+        guard loginStatusTask == nil else { return }
+        let read = Task.detached(priority: .utility) { SMAppService.mainApp.status == .enabled }
+        loginStatusTask = Task { [weak self] in
+            let enabled = await read.value
+            guard let self else { return }
+            self.loginStatusTask = nil
+            if !Task.isCancelled, self.loginEnabled != enabled { self.loginEnabled = enabled }
+        }
+    }
+
     func setLogin(_ enabled: Bool) {
+        loginStatusTask?.cancel()
         do { if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } } catch { errorMessage = "Autostart konnte nicht geändert werden: \(error.localizedDescription)" }
-        loginEnabled = SMAppService.mainApp.status == .enabled
-        if enabled && SMAppService.mainApp.status == .requiresApproval { errorMessage = "Der Autostart wartet auf deine Freigabe unter macOS → Anmeldeobjekte."; SMAppService.openSystemSettingsLoginItems() }
+        let status = SMAppService.mainApp.status
+        loginEnabled = status == .enabled
+        if enabled && status == .requiresApproval { errorMessage = "Der Autostart wartet auf deine Freigabe unter macOS → Anmeldeobjekte."; SMAppService.openSystemSettingsLoginItems() }
     }
     func exportSettings() {
         let panel = NSSavePanel(); panel.nameFieldStringValue = "AInauten-Voice-Einstellungen.json"

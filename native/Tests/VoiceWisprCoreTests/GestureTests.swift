@@ -3,6 +3,37 @@ import ApplicationServices
 @testable import VoiceWisprCore
 
 final class GestureTests: XCTestCase {
+    @MainActor func testUnavailableDictationShortcutsNotifyWithoutCapturingKeysOrStartingGesture() throws {
+        let hotkey = GlobalHotkey()
+        hotkey.shortcut = Shortcut(keyCode: 6, modifiers: CGEventFlags.maskControl.rawValue)
+        hotkey.bindings.holdExtras = [Shortcut(keyCode: 7, modifiers: CGEventFlags.maskControl.rawValue)]
+        hotkey.bindings.handsFree = [Shortcut(keyCode: 8, modifiers: CGEventFlags.maskControl.rawValue)]
+        hotkey.bindings.copyLast = [Shortcut(keyCode: 9, modifiers: CGEventFlags.maskControl.rawValue)]
+        var notifications = 0
+        var gestures: [DictationGesture] = []
+        hotkey.onUnavailableDictationShortcut = { notifications += 1 }
+        hotkey.onGesture = { gestures.append($0) }
+
+        for code: CGKeyCode in [6, 7, 8, 9, 10] {
+            let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true))
+            down.flags = .maskControl
+            XCTAssertTrue(hotkey.handle(.keyDown, event: down)?.takeUnretainedValue() === down)
+            down.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+            XCTAssertTrue(hotkey.handle(.keyDown, event: down)?.takeUnretainedValue() === down)
+            let up = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false))
+            XCTAssertTrue(hotkey.handle(.keyUp, event: up)?.takeUnretainedValue() === up)
+        }
+        XCTAssertEqual(notifications, 3)
+        XCTAssertTrue(gestures.isEmpty)
+
+        hotkey.enabled = true
+        let down = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: 6, keyDown: true))
+        down.flags = .maskControl
+        XCTAssertNil(hotkey.handle(.keyDown, event: down))
+        XCTAssertEqual(notifications, 3)
+        XCTAssertEqual(gestures, [.start])
+    }
+
     @MainActor func testTapTimeoutForwardsLaterOrdinaryKeyReleaseEvenWhenDisabled() throws {
         for enabled in [true, false] {
             let hotkey = GlobalHotkey(); hotkey.enabled = true

@@ -50,6 +50,7 @@ public final class DictationGestureMachine {
 
 @MainActor public final class GlobalHotkey {
     public var onGesture: ((DictationGesture) -> Void)?
+    public var onUnavailableDictationShortcut: (() -> Void)?
     public var onFailure: ((String) -> Void)?
     public var shortcut = Shortcut()
     public var bindings = ShortcutBindings()
@@ -165,7 +166,13 @@ public final class DictationGestureMachine {
             if type == .keyUp { capturedHoldKeys.remove(code); return nil }
             if type == .keyDown, event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
         }
-        guard enabled else { return Unmanaged.passUnretained(event) }
+        guard enabled else {
+            if let onUnavailableDictationShortcut,
+               ([shortcut] + bindings.holdExtras + bindings.handsFree).contains(where: activated) {
+                onUnavailableDictationShortcut()
+            }
+            return Unmanaged.passUnretained(event)
+        }
         let time = ProcessInfo.processInfo.systemUptime
         if bindings.copyLast.contains(where: activated) { onGesture?(.copyLast); return nil }
         if bindings.pasteLast.contains(where: activated) { onGesture?(.pasteLast); return nil }
