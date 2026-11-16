@@ -366,36 +366,8 @@ struct SettingsView: View {
                     languageSelection(compact: true)
                 }
             }
-            dictationQueuePanel
             Divider()
             dictationReadiness
-        }
-    }
-    @ViewBuilder private var dictationQueuePanel: some View {
-        if model.pendingDictationCount > 0 || !model.queuedDrafts.isEmpty || model.dictationQueueFailures > 0 {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(L10n.text("dictation.queue.title"), systemImage: "text.badge.plus")
-                    .font(.system(size: 14, weight: .semibold))
-                Text(L10n.text("dictation.queue.help")).font(.system(size: 12)).foregroundStyle(.secondary)
-                if model.pendingDictationCount > 0 {
-                    Label(model.dictationQueueStatus, systemImage: "hourglass")
-                        .font(.system(size: 12))
-                }
-                if model.dictationQueueFailures > 0 {
-                    Label(L10n.text("dictation.queue.failures", String(model.dictationQueueFailures)), systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 12)).foregroundStyle(.orange)
-                }
-                if !model.queuedDrafts.isEmpty {
-                    if model.queuedDrafts.contains(where: { !$0.isComplete }) {
-                        Text(L10n.text("dictation.queue.partial")).font(.system(size: 11)).foregroundStyle(.orange)
-                    }
-                    Text(model.queuedCombinedText).lineLimit(4).textSelection(.enabled)
-                    Text(L10n.text("dictation.queue.checkTarget")).font(.system(size: 11)).foregroundStyle(.secondary)
-                    Button(L10n.text("dictation.queue.copy", String(model.queuedDrafts.count))) { model.copyQueuedDrafts() }
-                        .buttonStyle(.bordered)
-                }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
         }
     }
     private var interfaceLanguagePicker: some View {

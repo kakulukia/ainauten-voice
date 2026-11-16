@@ -7,6 +7,7 @@
 "capture.deviceChanged" = "Mikrofon wurde geändert. Das bisherige Diktat wird abgeschlossen.";
 "capture.startTimedOut" = "Das Mikrofon liefert kein Audio. Prüfe das Eingabegerät und starte das Diktat erneut.";
 "capture.recordingAX" = "Aufnahme läuft";
+"capture.startingAX" = "Mikrofon startet. Bitte kurz warten.";
 "camera.permission" = "Bitte erlaube die Kamera für die Lippenlesen-Beta.";
 "camera.running" = "Eine Kameraaufnahme läuft bereits.";
 "camera.missing" = "Keine Kamera gefunden.";
