@@ -113,7 +113,6 @@
 "dictation.queue.processing" = "%@ recording(s) being processed · next dictation available";
 "dictation.queue.copy" = "Copy %@ texts together";
 "dictation.queue.full" = "Queue full. Wait for the next recording to finish.";
-"dictation.queue.collectFirst" = "Copy the collected texts before starting more dictations.";
 "dictation.queue.failed" = "One recording could not be processed. Other texts are preserved.";
 "dictation.queue.saved" = "Automatic insertion paused. Recover your text under Dictation.";
 "dictation.queue.copied" = "Collected texts copied. Paste with ⌘V.";

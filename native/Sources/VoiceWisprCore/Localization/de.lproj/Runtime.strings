@@ -113,7 +113,6 @@
 "dictation.queue.processing" = "%@ Aufnahme(n) in Bearbeitung · nächstes Diktat möglich";
 "dictation.queue.copy" = "%@ Texte gemeinsam kopieren";
 "dictation.queue.full" = "Warteschlange voll. Warte kurz auf den nächsten fertigen Text.";
-"dictation.queue.collectFirst" = "Bitte zuerst die gesammelten Texte übernehmen.";
 "dictation.queue.failed" = "Eine Aufnahme konnte nicht verarbeitet werden. Andere Texte bleiben erhalten.";
 "dictation.queue.saved" = "Automatisches Einfügen angehalten. Text unter Diktieren wiederherstellen.";
 "dictation.queue.copied" = "Gesammelte Texte kopiert. Mit ⌘V einfügen.";

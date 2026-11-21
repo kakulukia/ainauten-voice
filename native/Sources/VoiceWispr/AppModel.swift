@@ -1708,9 +1708,6 @@ extension AppModel {
     private func startQueuedCapture() {
         guard !quitting, !loading, !preparing, modelsReady, (!swissEnabled || swissReady), microphoneGranted,
               accessibilityGranted, !conflict, !document.settings.paused, sessionID == nil else { return }
-        guard queuedDrafts.count < 32 else {
-            status = L10n.text("dictation.queue.collectFirst"); return
-        }
         if !hasQueuedWork {
             // A completed failed series stays recoverable, but must not disable
             // automatic insertion for a new, independently captured target.
